@@ -1,0 +1,208 @@
+/* ===================================================
+   THE EMOTIONAL CHRONICLER — Cinematic CSS
+   Fonts: Cinzel (dramatic serif) + Inter (clean body)
+   Palette: Deep space purple + electric teal
+=================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+/* ── Reset & Base ───────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --space:     #050510;
+  --purple-dr: #1e1040;
+  --purple:    #7c3aed;
+  --purple-lt: #a78bfa;
+  --teal:      #06b6d4;
+  --teal-lt:   #67e8f9;
+  --gold:      #f59e0b;
+  --text:      #e2e8f0;
+  --text-dim:  #94a3b8;
+  --glass-bg:  rgba(5, 5, 20, 0.65);
+  --glass-border: rgba(124, 58, 237, 0.25);
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--space);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+}
+
+/* ── App Root ───────────────────────────────────── */
+.app-root {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 60% 80%, #1a0a3a 0%, #05051a 50%, #000008 100%);
+}
+
+/* ── Header / Title Badge ───────────────────────── */
+.app-header {
+  position: fixed;
+  top: 28px;
+  left: 32px;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.title-badge {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 14px 22px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow:
+    0 0 40px rgba(124, 58, 237, 0.15),
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+.title-badge__gem {
+  font-size: 24px;
+  color: var(--purple-lt);
+  filter: drop-shadow(0 0 8px var(--purple));
+  animation: gem-pulse 3s ease-in-out infinite;
+}
+
+@keyframes gem-pulse {
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 8px var(--purple)); }
+  50% { opacity: 0.7; filter: drop-shadow(0 0 16px var(--teal)); }
+}
+
+.app-title {
+  font-family: 'Cinzel', serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  background: linear-gradient(135deg, #fff 0%, var(--purple-lt) 60%, var(--teal) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.2;
+}
+
+.app-subtitle {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ── Connection Dot — top right ──────────────────── */
+.conn-dot {
+  position: fixed;
+  top: 28px;
+  right: 32px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 100px;
+  padding: 8px 16px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  pointer-events: none;
+  transition: border-color 0.4s ease;
+}
+
+.conn-dot__orb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.4s ease, box-shadow 0.4s ease;
+}
+
+.conn-dot__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+  font-family: 'Inter', sans-serif;
+}
+
+/* Status colours */
+.conn-dot--disconnected .conn-dot__orb { background: #4b5563; }
+.conn-dot--connecting   .conn-dot__orb { background: var(--purple-lt); box-shadow: 0 0 8px var(--purple-lt); animation: pulse-orb 1s ease infinite; }
+.conn-dot--connected    .conn-dot__orb { background: var(--teal); box-shadow: 0 0 8px var(--teal); }
+.conn-dot--listening    .conn-dot__orb { background: #10b981; box-shadow: 0 0 10px #10b981; animation: pulse-orb 1.5s ease infinite; }
+.conn-dot--speaking     .conn-dot__orb { background: var(--gold); box-shadow: 0 0 10px var(--gold); animation: pulse-orb 0.8s ease infinite; }
+.conn-dot--error        .conn-dot__orb { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+
+@keyframes pulse-orb {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ── Dev Emotion Buttons — bottom left ───────────── */
+.dev-emotions {
+  position: fixed;
+  bottom: 28px;
+  left: 32px;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+}
+
+.emo-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+}
+
+.emo-btn:hover {
+  transform: scale(1.15);
+  border-color: var(--purple);
+  box-shadow: 0 0 16px rgba(124, 58, 237, 0.4);
+}
+
+.emo-btn--active {
+  border-color: var(--purple-lt);
+  background: rgba(124, 58, 237, 0.25);
+  box-shadow: 0 0 20px rgba(124, 58, 237, 0.5);
+  transform: scale(1.1);
+}
+
+/* ── Subtle scanline overlay ─────────────────────── */
+.app-root::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.025) 2px,
+    rgba(0,0,0,0.025) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}

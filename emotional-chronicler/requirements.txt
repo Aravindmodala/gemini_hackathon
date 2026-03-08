@@ -1,0 +1,15 @@
+# The Emotional Chronicler — Python dependencies
+#
+# Core framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# Google ADK (Agent Development Kit)
+google-adk>=1.0.0
+
+# Authentication & environment
+google-auth>=2.35.0
+python-dotenv>=1.0.0
+
+# Firestore (session memory)
+google-cloud-firestore>=2.19.0

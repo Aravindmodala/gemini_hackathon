@@ -1,0 +1,77 @@
+📘 Project Documentation: "The Emotional Chronicler"
+Version: 1.0 (Hackathon Edition)
+Concept: A real-time, 3D-animated AI storyteller that perceives user emotions and physical surroundings to generate personalized, cinematic narratives with AI-generated video and music.
+
+🧱 1. System Components
+A. Frontend Client (The Interface)
+3D Engine: Three.js (WebGL) for rendering the animated character.
+Media Capture: Browser MediaDevices API for capturing 16-bit PCM audio (16kHz) and periodic JPEG video frames.
+Communication: WebSockets (WSS) for low-latency, bidirectional streaming.
+Audio Processing: Web Audio API for real-time frequency analysis (to drive 3D lip-sync blend shapes).
+B. AI Core Layer (The Brain)
+Primary Model: Gemini 3.1 Pro (Multimodal Live API). Handles simultaneous audio/vision processing and story reasoning.
+Vision Sub-model: Gemini 3 Flash. Optimized for low-cost, high-frequency "Mood Detection" and background object recognition.
+Feature Use: Function Calling (Tool Use) for triggering external media generation.
+C. Generative Services (The Atmosphere)
+Video Generation: Veo 3.1 (via Vertex AI). Generates 6-second high-fidelity cinematic loops for story backgrounds.
+Music Generation: Lyria 3. Creates 30-second high-fidelity ambient tracks based on the emotional state of the story.
+D. Backend & Infrastructure (The Backbone)
+Compute: Google Cloud Run. A containerized Python (FastAPI) environment managing WebSocket traffic and API orchestration.
+Database: Cloud Firestore. Stores "User Memories," story state, and emotional profiles.
+Storage: Google Cloud Storage (GCS). Houses static 3D assets (.glb) and dynamically generated media files.
+📘 Project Documentation: "The Emotional Chronicler"
+Version: 1.0 (Hackathon Edition)
+Concept: A real-time, 3D-animated AI storyteller that perceives user emotions and physical surroundings to generate personalized, cinematic narratives with AI-generated video and music.
+
+🧱 1. System Components
+A. Frontend Client (The Interface)
+3D Engine: Three.js (WebGL) for rendering the animated character.
+Media Capture: Browser MediaDevices API for capturing 16-bit PCM audio (16kHz) and periodic JPEG video frames.
+Communication: WebSockets (WSS) for low-latency, bidirectional streaming.
+Audio Processing: Web Audio API for real-time frequency analysis (to drive 3D lip-sync blend shapes).
+B. AI Core Layer (The Brain)
+Primary Model: Gemini 3.1 Pro (Multimodal Live API). Handles simultaneous audio/vision processing and story reasoning.
+Vision Sub-model: Gemini 3 Flash. Optimized for low-cost, high-frequency "Mood Detection" and background object recognition.
+Feature Use: Function Calling (Tool Use) for triggering external media generation.
+C. Generative Services (The Atmosphere)
+Video Generation: Veo 3.1 (via Vertex AI). Generates 6-second high-fidelity cinematic loops for story backgrounds.
+Music Generation: Lyria 3. Creates 30-second high-fidelity ambient tracks based on the emotional state of the story.
+D. Backend & Infrastructure (The Backbone)
+Compute: Google Cloud Run. A containerized Python (FastAPI) environment managing WebSocket traffic and API orchestration.
+Database: Cloud Firestore. Stores "User Memories," story state, and emotional profiles.
+Storage: Google Cloud Storage (GCS). Houses static 3D assets (.glb) and dynamically generated media files.
+Gemini said
+This is the exact, step-by-step Execution Flow for your application. It covers everything from the moment the user hits your URL to the moment the AI starts "dreaming" with them.
+
+🚀 The Execution Flow: "The Emotional Chronicler"
+Phase 1: Initial Entry & Asset Loading
+User Access: The user opens your website URL (hosted on Google Cloud Run).
+3D Initialization: The Frontend (React/Three.js) triggers the GLTFLoader.
+Asset Fetch: The browser pulls the Animated Avatar (.glb file) from Google Cloud Storage via a public or signed URL.
+Scene Render: The avatar appears on the screen in a neutral "Idle" animation (breathing/blinking).
+
+Phase 2: The Handshake (The "Wake Up")
+Permission Request: The website asks for Camera and Microphone access.
+WebSocket Connection: Once granted, the Frontend opens a WSS (Secure WebSocket) connection to the Cloud Run Backend.
+Brain Sync: The Backend connects to the Gemini 3.1 Pro Multimodal Live API.
+Greeting: Gemini receives the first video frame, sees the user, and says, "Welcome, traveler. I see you've arrived. How are you feeling today?"
+
+Phase 3: Real-Time Perception (The "Loop")
+Continuous Sensing: * Vision: The Frontend sends a JPEG snapshot of the user every 1–2 seconds.
+Audio: The Frontend streams raw 16-bit PCM audio chunks.
+Mood Detection: Gemini 3 Flash processes the images in the background to identify the user's emotional state (e.g., Stressed).
+Contextual Reasoning: Gemini 3.1 Pro combines the Mood + Voice Input + Firestore History (e.g., User likes Space) to decide the next story beat.
+
+Phase 4: The "Director" Action (Asset Generation)
+The Decision: Gemini decides to move the story to a "Calming Nebula" to help the stressed user.
+Tool Call: Gemini triggers a Function Call to the Backend: generate_environment(visual="nebula", audio="zen").
+Parallel Generation: * Veo 3.1 starts creating a 6-second cinematic nebula loop.
+Lyria 3 starts creating a 30-second ambient space track.
+Storage & Link: The Backend saves these new files to Google Cloud Storage and generates temporary URLs.
+
+Phase 5: Immersive Delivery (The "Magic")
+Data Return: The Backend sends the Video/Music URLs and the AI's spoken text back through the WebSocket.
+Lip-Syncing: The Frontend's AudioContext analyzes the incoming AI voice and moves the Three.js Avatar’s mouth in perfect sync.
+Environment Swap: The website background fades from a black screen to the Veo-generated video, and the Lyria-generated music begins to play.
+Memory Update: As the session ends, the Backend writes a summary of the story to Cloud Firestore so the Avatar remembers the "Nebula Trip" next time.
+
