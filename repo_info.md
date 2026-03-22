@@ -1,491 +1,483 @@
 # 📘 Repository Info — The Emotional Chronicler
-
-> A real-time, 3D-animated AI storyteller that perceives user emotions and physical surroundings to generate personalized, cinematic narratives with AI-generated music.
-
-**Competition:** Google Hackathon (Hackathon Edition v1.0)
+### Last updated: 2026-03-15 | Hackathon: Google Gemini Live Agent Challenge (deadline: 2026-03-16 17:00 PDT)
+### Category: **Creative Storyteller** (interleaved multimodal output)
 
 ---
 
-## 🗺️ High-Level Architecture
+## ✅ What Has Been Built (Current State)
 
-```mermaid
-graph TB
-    subgraph Frontend["frontend-react (Vite + React + Three.js)"]
-        UI[App Shell & HUD]
-        Avatar3D[3D Avatar Component]
-        AudioIO[Audio I/O Pipeline]
-        Store[Zustand State Store]
-    end
+The project has been **fully migrated from the old Gemini Live API voice architecture to a new ADK-based illustrated story generation system**. The migration is complete in code. The app has NOT yet been tested end-to-end — that is the immediate next step.
 
-    subgraph Backend["emotional-chronicler (FastAPI + Python)"]
-        Server[FastAPI Server]
-        Session[GeminiSession Orchestrator]
-        Relay[Bidirectional WS Relay]
-        Tools[Tool Registry]
-        Prompts[ELORA Persona Prompt]
-        Firestore[Firestore SessionStore]
-    end
+### Architecture Summary
 
-    subgraph Google["Google Cloud Services"]
-        GeminiLive[Gemini Live 2.5 Flash API]
-        Lyria[Lyria 2 Music Generation]
-        GCS[Cloud Storage - Avatar .glb]
-        FS[(Cloud Firestore)]
-    end
-
-    UI --> AudioIO
-    AudioIO -->|"WS: audio (PCM 16kHz)"| Server
-    Server -->|"WS: audio/text/status"| AudioIO
-    AudioIO --> Avatar3D
-    Store --> Avatar3D
-    Store --> UI
-
-    Server --> Session
-    Session --> Relay
-    Relay -->|"WS (wss://)"| GeminiLive
-    Session --> Prompts
-    Session --> Firestore
-    Relay --> Tools
-    Relay --> Firestore
-    Tools -->|"HTTP POST"| Lyria
-    Firestore --> FS
-    Avatar3D -->|"HTTPS fetch .glb"| GCS
+```
+User (browser)
+    │ types story prompt
+    ▼
+POST /api/story  (FastAPI)
+    │
+    ▼
+Google ADK Runner
+    └── Agent: Elora (gemini-3.1-pro-preview)
+            │ writes literary prose
+            │
+            ├── tool: generate_image(scene_description)
+            │       └── Imagen 4 (imagen-4.0-generate-001)
+            │           → saves PNG to _image_cache/
+            │           → returns { image_url: "/api/images/xxx.png" }
+            │
+            └── tool: generate_music(prompt)
+                    └── Lyria 2 (lyria-002) via Vertex AI REST
+                        → saves WAV to _music_cache/
+                        → returns { audio_url: "/api/music/xxx.wav" }
+    │
+    ▼ SSE stream
+Browser parses events:
+    {"type": "text",  "chunk": "...prose..."}
+    {"type": "image", "url": "/api/images/xxx.png", "caption": "..."}
+    {"type": "music", "url": "/api/music/xxx.wav", "duration": 33}
+    {"type": "done"}
+    │
+    ▼
+StoryView.tsx renders:
+    - Serif prose paragraphs (streaming, auto-scroll)
+    - Imagen 4 illustrations (full-width with caption)
+    - Lyria 2 music badge + <audio> player (auto-plays at 35% volume)
 ```
 
 ---
 
-## 📁 Directory Structure
+## 📁 Current Directory Structure
 
 ```
 gemini-storyteller/
-├── emotional-chronicler/          ← Python backend (FastAPI)
-│   ├── main.py                    ← Entrypoint: uvicorn main:app --port 3001
-│   ├── requirements.txt           ← Python dependencies
-│   ├── .env                       ← GCP project/location/port config
+├── repo_info.md                        ← this file
+├── emotional-chronicler/               # Python backend (FastAPI + ADK)
+│   ├── main.py                         # Entrypoint: uvicorn main:app --port 3001
+│   ├── requirements.txt                # includes google-adk>=0.4.0
+│   ├── .env                            # GOOGLE_CLOUD_PROJECT, LOCATION, PORT
+│   ├── _image_cache/                   # Imagen 4 generated PNGs (auto-created)
+│   ├── _music_cache/                   # Lyria 2 generated WAVs (auto-created)
 │   └── app/
-│       ├── __init__.py            ← Exports create_app()
-│       ├── config.py              ← Environment config & Vertex AI URL builders
+│       ├── config.py                   # env vars, GenAI client, cache dirs, model names
 │       ├── core/
-│       │   ├── auth.py            ← Google OAuth2 token acquisition
-│       │   ├── session.py         ← GeminiSession lifecycle orchestrator
-│       │   ├── relay.py           ← Bidirectional WebSocket relay logic
-│       │   └── store.py           ← Firestore SessionStore (memory layer)
+│       │   ├── agent.py                # ✅ NEW — ADK Agent + Runner definition
+│       │   ├── firebase.py             # Firebase admin init
+│       │   ├── store.py                # Firestore session CRUD (still present, used by session_routes)
+│       │   └── auth.py                 # Google ADC placeholder
 │       ├── server/
-│       │   ├── factory.py         ← FastAPI app factory (create_app)
-│       │   ├── middleware.py      ← CORS middleware setup
-│       │   └── routes.py          ← HTTP & WebSocket route handlers
+│       │   ├── factory.py              # FastAPI app factory, startup banner
+│       │   ├── middleware.py           # CORS (allow all origins — tighten for prod)
+│       │   ├── routes.py               # ✅ REWRITTEN — POST /api/story, GET /api/images, GET /api/music, GET /
+│       │   ├── session_routes.py       # REST CRUD for Firestore sessions (/api/sessions)
+│       │   └── auth_middleware.py      # Firebase token verification
 │       ├── tools/
-│       │   ├── base.py            ← BaseTool ABC (abstract tool interface)
-│       │   ├── __init__.py        ← ToolRegistry with auto-discovery
-│       │   ├── lyria.py           ← LyriaTool: AI music generation via Vertex AI
-│       │   └── google_search.py   ← GoogleSearchTool: built-in Gemini grounding
+│       │   ├── imagen.py               # ✅ NEW — Imagen 4 ADK tool function
+│       │   ├── lyria.py                # ✅ UPDATED — added standalone generate_music() ADK function
+│       │   ├── base.py                 # BaseTool ABC (legacy, no longer used by ADK path)
+│       │   ├── __init__.py             # ToolRegistry auto-discovery (legacy, not used by ADK)
+│       │   └── google_search.py        # GoogleSearchTool (legacy, not wired)
 │       └── prompts/
-│           └── elora.py           ← ELORA system prompt (~259 lines)
+│           └── elora.py                # ✅ REWRITTEN — literary author prompt for text+image stories
 │
-├── frontend-react/                ← React frontend (Vite + TypeScript)
-│   ├── index.html                 ← HTML shell
-│   ├── package.json               ← Dependencies & scripts
-│   ├── vite.config.ts             ← Vite configuration
-│   ├── tsconfig.json              ← TypeScript project references
+├── frontend-react/                     # React 19 + Vite + TypeScript + Three.js
 │   └── src/
-│       ├── main.tsx               ← React DOM root
-│       ├── App.tsx                ← Root component: header, HUD, emotion controls
-│       ├── App.css                ← Cinematic design system (glassmorphism)
-│       ├── index.css              ← Base reset
-│       ├── components/
-│       │   ├── Scene.tsx          ← Three.js Canvas: lighting, particles, shadows
-│       │   ├── Avatar.tsx         ← 3D avatar: bones, morphs, lip-sync, emotions
-│       │   ├── AvatarHUD.tsx      ← Floating control HUD: button, waveform, status
-│       │   └── PostFX.tsx         ← Post-processing: Bloom + Vignette
+│       ├── App.tsx                     # ✅ REWRITTEN — wires prompt → story → controls
 │       ├── hooks/
-│       │   └── useStoryteller.ts  ← WebSocket + audio capture/playback pipeline
-│       └── store/
-│           └── useAvatarStore.ts  ← Zustand store: action, emotion, lipSyncVolume
-│
-├── cors.json                      ← GCS CORS configuration
-├── docx_content.txt               ← Original project documentation
-└── venv/                          ← Python virtual environment
+│       │   ├── useStoryteller.ts       # ✅ REWRITTEN — SSE fetch, no WebSocket, no mic
+│       │   └── useSessions.ts          # REST session list/delete/rename (unchanged)
+│       ├── components/
+│       │   ├── StoryView.tsx           # ✅ NEW — scrollable prose + images + music player
+│       │   ├── StoryPrompt.tsx         # ✅ NEW — prompt textarea + genre chips + submit
+│       │   ├── AvatarHUD.tsx           # ✅ REWRITTEN — generating/done status + stop/new controls
+│       │   ├── Scene.tsx               # 3D canvas + lighting + sparkles (UNCHANGED)
+│       │   ├── Avatar.tsx              # 3D character (UNCHANGED — still decorative bg)
+│       │   ├── SessionSidebar.tsx      # Story history sidebar (UNCHANGED)
+│       │   ├── AuthScreen.tsx          # Firebase Google sign-in (UNCHANGED)
+│       │   └── PostFX.tsx              # Bloom + vignette (UNCHANGED)
+│       ├── contexts/
+│       │   └── AuthContext.tsx         # Firebase auth state (UNCHANGED)
+│       ├── store/
+│       │   └── useAvatarStore.ts       # Avatar state (UNCHANGED — avatar still animates idle)
+│       └── config/
+│           └── firebase.ts             # Firebase SDK init (UNCHANGED)
 ```
+
+### ❌ Deleted Files
+- `emotional-chronicler/app/core/session.py` — Live API GeminiSession (removed)
+- `emotional-chronicler/app/core/relay.py` — Live API bidirectional relay (removed)
 
 ---
 
-## 🔧 Backend Deep Dive
+## 🔧 Key Files — Deep Dive
 
-### Tech Stack
-
-| Layer        | Technology                           | Version   |
-| ------------ | ------------------------------------ | --------- |
-| Framework    | FastAPI                              | ≥ 0.115.0 |
-| ASGI Server  | Uvicorn                              | ≥ 0.32.0  |
-| AI Agent Kit | Google ADK                           | ≥ 1.0.0   |
-| Auth         | google-auth                          | ≥ 2.35.0  |
-| Database     | google-cloud-firestore               | ≥ 2.19.0  |
-| AI Model     | Gemini Live 2.5 Flash (native audio) | —         |
-| Music Model  | Lyria 002                            | —         |
-| Env Config   | python-dotenv                        | ≥ 1.0.0   |
-
-### Environment Variables (`.env`)
-
-| Variable                    | Value                     | Purpose                 |
-| --------------------------- | ------------------------- | ----------------------- |
-| `GOOGLE_CLOUD_PROJECT`      | `gemini-liveagent-488913` | GCP project ID          |
-| `GOOGLE_CLOUD_LOCATION`     | `us-central1`             | Vertex AI region        |
-| `GOOGLE_GENAI_USE_VERTEXAI` | `TRUE`                    | Force Vertex AI backend |
-| `PORT`                      | `3001`                    | Server port             |
-
-### Entrypoint — `main.py`
-
-- Loads `.env` via `python-dotenv`
-- Configures structured logging to stdout
-- Imports `create_app()` from `app` package
-- Exposes `app` for Uvicorn: `uvicorn main:app --port 3001 --reload`
-
-### Configuration — `app/config.py`
-
-- **`FRONTEND_DIR`**: Points to `../frontend-react/dist` for serving static build
-- **`GEMINI_LIVE_MODEL`**: `"gemini-live-2.5-flash-native-audio"`
-- **`get_gemini_ws_url()`**: Builds Vertex AI WebSocket URL:
-  `wss://{LOCATION}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`
-- **`get_model_resource_name()`**: Full resource path:
-  `projects/{PROJECT_ID}/locations/{LOCATION}/publishers/google/models/{MODEL}`
-
-### Server Layer — `app/server/`
-
-#### `factory.py` — App Factory Pattern
-
-- Validates `GOOGLE_CLOUD_PROJECT` is set (exits with error if missing)
-- Lifespan context manager logs startup config banner
-- Mounts static files from `FRONTEND_DIR`
-- Attaches CORS middleware and API router
-
-#### `middleware.py`
-
-- Permissive CORS: all origins (`*`), all methods, all headers
-
-#### `routes.py`
-
-- **`GET /`** → Serves `index.html` from frontend build
-- **`WS /ws`** → WebSocket endpoint:
-  - Accepts optional `?user_id=` query param (or generates UUID)
-  - Creates a `GeminiSession` per connection using the singleton `tool_registry`
-
-### Core — `app/core/`
-
-#### `auth.py` — Google OAuth2
-
-- Uses Application Default Credentials
-- Scoped to `cloud-platform` for Vertex AI access
-- Returns fresh OAuth2 bearer token
-
-#### `session.py` — `GeminiSession` (Central Orchestrator)
-
-The session lifecycle is:
-
+### `app/config.py`
+```python
+STORY_MODEL  = "gemini-3.1-pro-preview"    # ADK agent brain (override via env STORY_MODEL)
+IMAGEN_MODEL = "imagen-4.0-generate-001"   # Imagen 4 (override via env IMAGEN_MODEL)
+LYRIA_MODEL  = "lyria-002"                 # Lyria 2 (hardcoded)
+IMAGE_CACHE_DIR = BASE_DIR / "_image_cache"
+MUSIC_CACHE_DIR = BASE_DIR / "_music_cache"
+genai_client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
 ```
-1. Create Firestore session (SessionStore.create_session)
-2. Get OAuth2 access token (auth.get_access_token)
-3. Connect to Gemini Live API via WebSocket (WSS + Bearer token)
-4. Send BidiGenerateContentSetup message:
-   - Model resource name
-   - System instruction (ELORA prompt + previous session memory)
-   - Tool declarations (from ToolRegistry)
-   - Generation config: AUDIO + TEXT response modalities
-   - Voice: "Aoede" preset
-5. Run bidirectional relay (asyncio.gather):
-   - relay_gemini_to_client (Gemini → Browser)
-   - relay_client_to_gemini (Browser → Gemini)
-6. Cleanup: end Firestore session, close Gemini WS
+Also sets these env vars at import time so ADK picks them up:
+```python
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+os.environ["GOOGLE_CLOUD_PROJECT"]       = PROJECT_ID
+os.environ["GOOGLE_CLOUD_LOCATION"]      = LOCATION
 ```
 
-#### `relay.py` — Bidirectional WebSocket Relay
+### `app/core/agent.py`
+```python
+from google.adk.agents import Agent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
 
-**Gemini → Client (`relay_gemini_to_client`):**
-
-| Gemini Event                                 | Action                                                                        |
-| -------------------------------------------- | ----------------------------------------------------------------------------- |
-| `setupComplete`                              | Send `{type: "status", status: "ready"}` to browser                           |
-| `toolCall`                                   | Dispatch via registry → send `toolResponse` back to Gemini → log to Firestore |
-| `serverContent.inputTranscript`              | Log user speech to Firestore + send as `transcript` to browser                |
-| `serverContent.modelTurn.parts[].inlineData` | Forward audio chunks to browser                                               |
-| `serverContent.modelTurn.parts[].text`       | Log ELORA's text to Firestore + send as `transcript` to browser               |
-| `serverContent.turnComplete`                 | Send `{type: "status", status: "turn_complete"}`                              |
-
-**Client → Gemini (`relay_client_to_gemini`):**
-
-- Receives `{type: "audio", data: "<base64>"}` from browser
-- Wraps as `realtimeInput.mediaChunks` with `audio/pcm;rate=16000`
-- Sends to Gemini WebSocket
-
-#### `store.py` — `SessionStore` (Firestore Memory Layer)
-
-**Firestore Schema:**
-
+elora_agent = Agent(
+    name="elora",
+    model=STORY_MODEL,                        # gemini-3.1-pro-preview
+    instruction=ELORA_SYSTEM_PROMPT,
+    tools=[generate_image, generate_music],   # plain async functions
+)
+runner = Runner(agent=elora_agent, app_name="emotional_chronicler",
+                session_service=InMemorySessionService())
 ```
-sessions/
-  └── {user_id}/
-      └── conversations/
-          └── {session_id}/
-              ├── created_at: timestamp
-              ├── updated_at: timestamp
-              ├── status: "active" | "ended"
-              └── interactions: [
-                    { role: "user"|"elora"|"tool", text/name/args, timestamp }
-                  ]
+⚠️ **InMemorySessionService** — sessions are lost on server restart. Swap for Firestore-backed service for production (see TODO below).
+
+### `app/tools/imagen.py`
+- Async function `generate_image(scene_description, style)` — ADK tool
+- Calls `genai_client.models.generate_images(model=IMAGEN_MODEL, prompt=..., config=GenerateImagesConfig(aspect_ratio="16:9", number_of_images=1))`
+- Saves PNG to `_image_cache/{uuid}.png`
+- Returns `{"image_url": "/api/images/xxx.png", "caption": "..."}`
+
+### `app/tools/lyria.py`
+- Contains **two implementations**:
+  1. `LyriaTool(BaseTool)` — old class-based tool (legacy, not used by ADK)
+  2. `generate_music(prompt, negative_prompt)` — new standalone async function (ADK tool)
+- Calls Lyria 2 via Vertex AI REST (`/publishers/google/models/lyria-002:predict`)
+- Saves WAV to `_music_cache/{uuid}.wav`
+- Returns `{"audio_url": "/api/music/xxx.wav", "duration_seconds": 33}`
+
+### `app/server/routes.py`
+```
+GET  /                      → serve frontend index.html
+POST /api/story             → ADK agent SSE stream
+GET  /api/images/{filename} → serve Imagen 4 PNGs from _image_cache/
+GET  /api/music/{filename}  → serve Lyria 2 WAVs from _music_cache/
+```
+SSE event format:
+```json
+{"type": "text",  "chunk": "prose text..."}
+{"type": "image", "url": "/api/images/abc.png", "caption": "..."}
+{"type": "music", "url": "/api/music/abc.wav",  "duration": 33}
+{"type": "done"}
+{"type": "error", "message": "..."}
 ```
 
-**Key Methods:**
+### `app/prompts/elora.py`
+Completely rewritten for illustrated storytelling. Key rules:
+- Write like a published novelist (third person, named characters, literary prose)
+- **NEVER ask the reader questions** (5x explicit prohibition)
+- Call `generate_image` at key visual moments (every 3–4 paragraphs max)
+- Call `generate_music` at major scene/mood transitions
+- End with a weighty final line, then stop
 
-- `create_session()` → New session doc with UUID hex[:12]
-- `log_interaction(role, text)` → ArrayUnion append
-- `log_tool_call(name, args)` → ArrayUnion append with `role: "tool"`
-- `end_session()` → Set `status: "ended"`
-- `get_previous_context()` → Query last ended session, format last 20 interactions as narrative memory injected into ELORA's prompt
+### `frontend-react/src/hooks/useStoryteller.ts`
+```typescript
+useStoryteller({ getIdToken }) → {
+  status: 'idle' | 'generating' | 'done' | 'error',
+  sections: StorySection[],     // accumulated story blocks
+  currentMusic: string | null,  // currently playing audio URL
+  startStory(prompt: string),   // POST /api/story → parse SSE
+  stopStory(),                  // abort fetch, pause audio
+}
 
-**Resilience:** Gracefully degrades if Firestore is unavailable — logs warnings but doesn't crash.
+type StorySection =
+  | { type: 'text';  content: string }
+  | { type: 'image'; url: string; caption: string }
+  | { type: 'music'; url: string; duration: number }
+```
+Text chunks are **merged into the last text section** — consecutive chunks produce flowing prose, not fragmented words.
 
-### Tools — `app/tools/`
+### `frontend-react/src/components/StoryView.tsx`
+- Fixed-position centered panel, 740px wide, 72vh max height, scrolls automatically
+- Prose: Georgia serif, 17px, 1.85 line height, justified, 1.5em indent
+- Images: full-width 16:9 with figcaption
+- Music: badge with SVG music icon + native `<audio controls>` element
+- Blinking cursor shown while `status === 'generating'`
 
-#### Auto-Discovery System (`__init__.py`)
+### `frontend-react/src/components/StoryPrompt.tsx`
+- Shown when `status === 'idle'` or `status === 'error'`
+- Textarea + "Begin the Story" button (⌘Enter shortcut)
+- 6 genre suggestion chips that fill the textarea on click
+- Positioned at bottom center of screen
 
-`ToolRegistry` scans all `.py` modules in `app/tools/`, finds `BaseTool` subclasses via reflection, and instantiates them automatically. No manual registration needed.
-
-**API:**
-
-- `get_declarations()` → List of tool dicts for Gemini setup message
-- `dispatch(name, **kwargs)` → Execute matching tool, skip built-ins
-
-#### `base.py` — `BaseTool` (ABC)
-
-| Property/Method                          | Purpose                                        |
-| ---------------------------------------- | ---------------------------------------------- |
-| `name` (abstract property)               | Unique dispatch key                            |
-| `declaration` (abstract property)        | Gemini-format tool declaration dict            |
-| `execute(**kwargs)` (abstract)           | Run tool, return result dict                   |
-| `is_builtin` (property, default `False`) | If `True`, Gemini handles execution internally |
-
-#### `lyria.py` — `LyriaTool` (Music Generation)
-
-- **Name:** `generate_music`
-- **Model:** Lyria 002 on Vertex AI
-- **Parameters:** `prompt` (required), `negative_prompt` (optional)
-- **Flow:** OAuth2 token → HTTP POST to Vertex AI predict endpoint → Returns base64 WAV audio
-- **Timeout:** 120 seconds
-- **Returns:** `{audio_content, mime_type, duration_seconds: 33, description}`
-
-#### `google_search.py` — `GoogleSearchTool`
-
-- **Name:** `google_search`
-- **Built-in:** `True` (Gemini handles internally)
-- **Declaration:** `{"googleSearch": {}}`
-- No local execution — just ensures the declaration is in the setup message
-
-### Prompts — `app/prompts/elora.py`
-
-The **ELORA system prompt** (~259 lines, ~18KB) defines the AI storyteller persona with:
-
-1. **Persona:** Ancient, ethereal storyteller — warm, dramatic, theatrical
-2. **Director Mindset:** Thinks like Spielberg + Miyazaki + Hitchcock; controls pacing, tension, music cues
-3. **Voice Style:** Mystical bard crossed with warm grandmother; tone shifts with story mood
-4. **Role:** Greets users warmly, crafts personalized stories, adapts real-time, makes user the hero
-5. **Abilities:**
-   - 🔍 `google_search` — Grounding in real-world knowledge
-   - 🎵 `generate_music` — Cinematic scoring with detailed composition guidance
-   - 🎨 `generate_image` — Scene illustration (declared but not yet implemented as a tool)
-6. **Cinematic Scoring Masterclass:** Extensive guidance on when/how to trigger music:
-   - The Overture, Emotional Turn, Climax, Quiet After Storm, Wonder, Pursuit, Farewell, Battle Cry
-   - Music timing principles: silence before big moments, 2-4 cues per arc
-7. **Storytelling Rules:** Never break character, no bullet points, three-act structure, cliffhangers
+### `frontend-react/src/components/AvatarHUD.tsx`
+- Hidden when `status === 'idle'`
+- Shows status badge (pulsing orb + label) when generating/done/error
+- **Stop** button (red) during `generating`
+- **New Story** button (purple gradient) when `done` or `error`
 
 ---
 
-## 🎨 Frontend Deep Dive
+## 🔑 Environment Variables
 
-### Tech Stack
-
-| Layer             | Technology                  | Version  |
-| ----------------- | --------------------------- | -------- |
-| Framework         | React                       | ^19.2.0  |
-| Build Tool        | Vite                        | ^7.3.1   |
-| Language          | TypeScript                  | ~5.9.3   |
-| 3D Engine         | Three.js                    | ^0.183.2 |
-| 3D React Bindings | @react-three/fiber          | ^9.5.0   |
-| 3D Helpers        | @react-three/drei           | ^10.7.7  |
-| Post-Processing   | @react-three/postprocessing | ^3.0.4   |
-| State Management  | Zustand                     | ^5.0.11  |
-
-### Design System (CSS)
-
-- **Fonts:** Cinzel (dramatic serif for titles) + Inter (clean sans-serif for body)
-- **Color Palette:**
-  - `--space: #050510` (deep background)
-  - `--purple: #7c3aed` / `--purple-lt: #a78bfa` (primary)
-  - `--teal: #06b6d4` / `--teal-lt: #67e8f9` (accent)
-  - `--gold: #f59e0b` (speaking state)
-- **Effects:** Glassmorphism (blur + translucent backgrounds), scanline overlay, gradient title text, animated gem pulse
-
-### Component Architecture
-
-#### `App.tsx` — Root Component
-
-- Title badge (top-left, glassmorphic)
-- Connection status dot (top-right, color-coded by state)
-- `<AvatarHUD>` — Floating talk button (center-bottom)
-- Dev emotion controls (bottom-left): 😐 😊 😢 😲
-- 3D `<Scene>` is imported but **currently disabled** (commented out)
-
-#### `Scene.tsx` — Three.js Canvas
-
-- **Lighting:** 4-point cinematic setup (key, rim, fill, ground bounce)
-- **Environment:** City preset HDRI for reflections
-- **Particles:** Purple + teal sparkles for magical atmosphere
-- **Shadows:** `ContactShadows` on the ground plane
-- **Controls:** `OrbitControls` (pan/zoom disabled, limited polar angle)
-- **Post-processing:** Via `PostFX` component
-
-#### `Avatar.tsx` — 3D Character (~302 lines)
-
-**Asset:** `.glb` model from Google Cloud Storage:
-
-```
-https://storage.googleapis.com/storyteller-avatars/69a498bf2b9bcc76d542b064.glb
-```
-
-**Features:**
-
-1. **Entrance Animation:** Slides in from left (`x: -7 → 0`) with cubic ease-out over 1.8s
-2. **Wave Gesture:** After arrival, right arm waves for 2.2s then returns to rest
-3. **Procedural Breathing:** Spine oscillates subtly on every frame
-4. **Head Mouse Tracking:** Head bone follows pointer position smoothly
-5. **Morph Target Emotions:**
-   - `happy` → mouthSmile + browInnerUp
-   - `sad` → browInnerUp + mouthFrown + mouthPucker
-   - `surprised` → jawOpen + browOuterUp + eyeWide
-   - `neutral` → all lerp to zero
-6. **Automatic Blinking:** Random interval (2.5–6.5s), sine-wave blink curve
-7. **Real-Time Lip Sync:** `jawOpen` morph driven by `lipSyncVolume` from audio analysis
-8. **Teeth Sync:** Mirrors jaw morph to teeth mesh
-
-**Bone Detection:** Auto-discovers bones by regex pattern (Spine, Head, RightArm, LeftArm, etc.)
-**Morph Detection:** Multi-name lookup for compatibility across RPM model versions
-
-#### `AvatarHUD.tsx` — Floating Control Panel
-
-- **Status-aware button** with ripple ring animation and contextual icons:
-  - Idle → Mic icon + "Talk to Elora"
-  - Connecting → Spinner + "Awakening…"
-  - Listening → Wave icon + "End Session"
-  - Speaking → Sound icon + "End Session"
-- **Waveform Bars:** 10-bar visualization during speaking state
-- **Status Badge:** Color-coded orb + label (only visible when active)
-
-#### `PostFX.tsx` — Post-Processing Effects
-
-- **Bloom:** `luminanceThreshold: 0.15`, `intensity: 1.2`
-- **Vignette:** `offset: 0.4`, `darkness: 0.8`
-
-### State Management — `useAvatarStore.ts`
-
-Zustand store with:
-
-- `currentAction`: `'Idle' | 'Speaking' | 'Listening'`
-- `currentEmotion`: `'neutral' | 'happy' | 'sad' | 'surprised'`
-- `lipSyncVolume`: `number` (0–1, drives jaw morph)
-
-### Audio Pipeline — `useStoryteller.ts` (~297 lines)
-
-**6-state machine:** `disconnected → connecting → connected → listening → speaking → error`
-
-**Microphone Capture (Client → Server):**
-
-1. `getUserMedia` with mono, 16kHz ideal, echo/noise cancellation
-2. `ScriptProcessorNode` (4096 buffer) on each audio process event:
-   - Downsample from native rate to 16kHz (linear interpolation)
-   - Float32 → Int16 PCM conversion
-   - Base64 encode
-   - Send as `{type: "audio", data}` over WebSocket
-
-**Audio Playback (Server → Client):**
-
-1. Receive `{type: "audio", data}` from server
-2. Base64 → Int16 → Float32 conversion
-3. Create `AudioBuffer` at 24kHz playback rate
-4. Schedule via `AudioBufferSourceNode.start()` with gapless timing
-5. Route through `AnalyserNode` for frequency analysis
-6. `requestAnimationFrame` loop reads frequency data → normalizes to 0–1 volume → pushes to `lipSyncVolume` in Zustand store
-
-**WebSocket Messages Handled:**
-
-| Server Message                              | Frontend Action                                       |
-| ------------------------------------------- | ----------------------------------------------------- |
-| `{type: "status", status: "connected"}`     | Set state to `connected`                              |
-| `{type: "status", status: "ready"}`         | Set state to `listening`, avatar → Idle               |
-| `{type: "status", status: "turn_complete"}` | Set state to `listening`, avatar → Idle               |
-| `{type: "audio", data, mimeType}`           | Set state to `speaking`, avatar → Talking, play audio |
-| `{type: "tool_event", name}`                | Log to console                                        |
-| `{type: "error", message}`                  | Set state to `error`                                  |
-
-**Image Upload (unused in UI currently):**
-
-- `sendImage(file)` → FileReader → base64 → send as `{type: "image", mimeType, data}`
-
----
-
-## 🔄 Data Flow Summary
-
-```
-User speaks into mic
-  → Browser captures PCM audio @ 16kHz
-  → Base64 encode → WS to FastAPI (/ws)
-  → FastAPI relay → Gemini Live API (WSS)
-  → Gemini processes:
-      - Speech-to-text (inputTranscript)
-      - Story reasoning (ELORA persona + memory)
-      - Tool calls (generate_music, google_search)
-  → Gemini responds:
-      - Audio (ELORA's voice, "Aoede")
-      - Text (narration transcript)
-      - Tool calls (function calling)
-  → FastAPI relay → Browser via WS
-  → Browser plays audio @ 24kHz
-  → AnalyserNode → lipSyncVolume → Avatar jaw morph
-  → Firestore logs all interactions for session memory
-```
+| Variable | Example | Required |
+|---|---|---|
+| `GOOGLE_CLOUD_PROJECT` | `gemini-liveagent-488913` | ✅ Yes |
+| `GOOGLE_CLOUD_LOCATION` | `us-central1` | ✅ Yes (default: us-central1) |
+| `FIREBASE_ENABLED` | `true` | ✅ Yes (set false to skip auth in dev) |
+| `PORT` | `3001` | Default: 3000 |
+| `STORY_MODEL` | `gemini-3.1-pro-preview` | Default as shown |
+| `IMAGEN_MODEL` | `imagen-4.0-generate-001` | Default as shown |
 
 ---
 
 ## 🚀 How to Run
 
 ### Backend
-
 ```bash
 cd emotional-chronicler
-pip install -r requirements.txt
-# Ensure .env has valid GCP credentials
+pip install -r requirements.txt    # installs google-adk, google-genai, fastapi, etc.
+# Ensure gcloud auth application-default login has been run
 uvicorn main:app --port 3001 --reload
 ```
 
-### Frontend
-
+### Frontend (dev)
 ```bash
 cd frontend-react
 npm install
-npm run dev     # Dev server on http://localhost:5173
-npm run build   # Production build to dist/
+npm run dev       # http://localhost:5173
+# Vite proxies /api/* to localhost:3001 (check vite.config.ts)
 ```
 
-### Access
-
-- **Frontend Dev:** `http://localhost:5173`
-- **Backend API Docs:** `http://localhost:3001/docs`
-- **WebSocket:** `ws://localhost:3001/ws?user_id=<optional>`
+### Frontend (production build — served by backend)
+```bash
+cd frontend-react
+npm run build     # outputs to dist/
+# Backend serves dist/ as static files at /
+```
 
 ---
 
-## ⚠️ Current State & Notes
+## ⚠️ KNOWN ISSUES / THINGS TO VERIFY IMMEDIATELY
 
-1. **3D Scene disabled:** `<Scene />` is commented out in `App.tsx` — only the HUD and 2D UI render
-2. **`generate_image` tool referenced in ELORA prompt** but not yet implemented as a `BaseTool` subclass
-3. **ScriptProcessorNode deprecation:** Frontend uses `ScriptProcessorNode` instead of `AudioWorklet` (works but deprecated)
-4. **Hardcoded WS URL:** Frontend connects to `ws://localhost:3001/ws` — needs env-based config for production
-5. **No Veo integration yet:** Project docs mention Veo 3.1 for video generation, but no tool or code exists for it
-6. **CORS wide open:** `allow_origins=["*"]` — fine for dev, needs tightening for production
+These must be checked before the hackathon submission:
+
+### 1. google-adk package API compatibility ⚠️ CRITICAL
+The code in `agent.py` and `routes.py` uses:
+```python
+from google.adk.agents import Agent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types as genai_types
+# runner.run_async(user_id, session_id, new_message=genai_types.Content(...))
+# event.content.parts → part.text / part.function_response
+```
+**Risk:** `google-adk` is evolving rapidly. The exact import paths and API surface may differ from the installed version. Run `pip show google-adk` and check the version. If imports fail, check the ADK changelog and update `agent.py` and `routes.py` accordingly.
+
+**Fallback if ADK fails:** Replace ADK with a direct `genai_client.models.generate_content()` call with `response_modalities=["TEXT"]`, and call `generate_image` / `generate_music` as regular tool calls using the GenAI SDK function calling API (`google.genai.types.FunctionDeclaration`). This avoids the ADK dependency entirely.
+
+### 2. gemini-3.1-pro-preview model availability ⚠️
+Verify that `gemini-3.1-pro-preview` is available in your GCP project and region. If not, try:
+- `gemini-3.0-pro-preview`
+- `gemini-2.5-pro-preview`
+- `gemini-2.0-flash-exp` (definitely available, may produce lower quality prose)
+
+### 3. Imagen 4 model ID ⚠️
+Verify `imagen-4.0-generate-001` is the correct model ID. If it fails, try:
+- `imagen-4.0-generate-preview-05-20`
+- `imagegeneration@006`
+Check: https://cloud.google.com/vertex-ai/generative-ai/docs/image/generate-images
+
+### 4. ADK session service async API
+`routes.py` calls:
+```python
+existing = await runner.session_service.get_session(...)
+await runner.session_service.create_session(...)
+```
+Verify these methods are `async` in the installed ADK version. If they're synchronous, remove the `await`.
+
+### 5. Vite proxy config
+The frontend calls `fetch('/api/story', ...)`. In dev mode, Vite needs to proxy `/api` to the backend. Check `frontend-react/vite.config.ts` — it should have:
+```typescript
+server: {
+  proxy: { '/api': 'http://localhost:3001' }
+}
+```
+If missing, add it.
+
+### 6. TypeScript errors in tests
+The test files (`useStoryteller.test.ts`, `AvatarHUD.test.tsx`) test the OLD interface. They will fail. Either:
+- Update the tests to match the new interfaces
+- Or skip tests for now (`npm run build` does not require passing tests)
+
+### 7. SessionSidebar `onSelectSession`
+In `App.tsx`, `onSelectSession` is now a no-op `() => {}`. The sidebar still renders session history fetched from `/api/sessions` (Firestore). This is fine for display, but selecting a past session does nothing. Post-hackathon: wire session selection to reload the story from Firestore.
+
+---
+
+## 📋 REMAINING TODO (Priority Order for Hackathon)
+
+### 🔴 P0 — Must do before submission
+
+1. **Install and test google-adk**
+   ```bash
+   cd emotional-chronicler
+   pip install google-adk
+   python -c "from google.adk.agents import Agent; print('OK')"
+   ```
+   Fix any import errors in `agent.py` and `routes.py`.
+
+2. **Test the full story generation pipeline**
+   ```bash
+   curl -X POST http://localhost:3001/api/story \
+     -H "Content-Type: application/json" \
+     -d '{"prompt": "A short magical fantasy story"}' \
+     --no-buffer
+   ```
+   Verify SSE events come through: text chunks, then image URL, then music URL, then done.
+
+3. **Verify Imagen 4 and Lyria 2 work**
+   - Check `_image_cache/` for PNGs after a story run
+   - Check `_music_cache/` for WAVs after a story run
+   - If Imagen 4 fails, fall back to Imagen 3 (`imagegeneration@006`)
+   - If Lyria fails, the story should still work (music is optional)
+
+4. **Build and test frontend**
+   ```bash
+   cd frontend-react
+   npm install
+   npm run build
+   ```
+   Fix any TypeScript errors. The most likely errors are in test files — ignore tests, focus on build.
+
+5. **End-to-end browser test**
+   - Open `http://localhost:3001`
+   - Sign in with Google
+   - Type a story prompt
+   - Verify text streams in, image appears, music plays
+
+### 🟡 P1 — Important for a good demo
+
+6. **Fix cursor animation in StoryView**
+   In `App.tsx` there's a global `<style>` tag with the `blink` keyframe. But `StoryView.tsx` also references it inline. Make sure the CSS keyframe is globally available. Add to `App.css` or `index.css`:
+   ```css
+   @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+   @keyframes pulse-orb { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+   ```
+
+7. **`textarea` focus style** — add to `App.css` or inline:
+   ```css
+   textarea:focus { border-color: rgba(124,58,237,0.6) !important; }
+   ```
+
+8. **Genre suggestion chips hover style** — add to `App.css`:
+   ```css
+   button:hover { background: rgba(124,58,237,0.15) !important; color: #c4b5fd !important; }
+   ```
+
+9. **StoryView scrollbar styling** — Chrome doesn't honor `scrollbar-color`. Add webkit scrollbar styles in `index.css` or `App.css`:
+   ```css
+   ::-webkit-scrollbar { width: 6px; }
+   ::-webkit-scrollbar-track { background: transparent; }
+   ::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.4); border-radius: 3px; }
+   ```
+
+10. **Stop/new story keyboard shortcut** — add Escape key handler in App.tsx to stop generation.
+
+### 🟢 P2 — Nice to have / post-hackathon
+
+11. **Replace InMemorySessionService with Firestore-backed session persistence**
+    This makes stories survive server restarts and supports session resumption.
+    The `SessionStore` in `store.py` already has Firestore CRUD. Wire it to the ADK session service.
+
+12. **Session sidebar "select session" → load story**
+    Currently a no-op. To implement: store the generated `sections[]` array in Firestore when a story completes. On session select, fetch and display the stored story.
+
+13. **Cache cleanup**
+    `_image_cache/` and `_music_cache/` grow forever. Add a background task or LRU-based cleanup (e.g. delete files older than 24h on startup).
+
+14. **CORS hardening**
+    `middleware.py` allows all origins. Lock down to your production domain before submission.
+
+15. **Google Cloud Run deployment** (required for hackathon compliance)
+    ```bash
+    gcloud run deploy emotional-chronicler \
+      --source . \
+      --region us-central1 \
+      --allow-unauthenticated
+    ```
+    The app must be deployed on GCP for the hackathon.
+
+16. **Update `repo_info.md` with the Cloud Run URL** once deployed.
+
+---
+
+## 🏆 Hackathon Compliance Checklist
+
+| Requirement | Status |
+|---|---|
+| Uses a Gemini model | ✅ gemini-3.1-pro-preview |
+| Built with Google GenAI SDK or ADK | ✅ google-adk + google-genai |
+| Uses Google Cloud service | ✅ Vertex AI (Imagen 4, Lyria 2), Firestore |
+| Creative Storyteller category — interleaved output | ✅ Text + Imagen 4 images + Lyria 2 music |
+| Deployed on Google Cloud | ❌ Not yet — must deploy to Cloud Run |
+| Firebase auth | ✅ Implemented |
+| Working demo | ⚠️ Code complete, not yet tested end-to-end |
+
+---
+
+## 🗺️ Architecture Diagram (Current)
+
+```mermaid
+graph TB
+    subgraph Frontend["frontend-react (Vite + React + Three.js)"]
+        SP[StoryPrompt — textarea + chips]
+        SV[StoryView — prose + images + music]
+        HUD[AvatarHUD — status + controls]
+        Scene3D[Scene — 3D avatar background]
+        Hook[useStoryteller — SSE fetch]
+    end
+
+    subgraph Backend["emotional-chronicler (FastAPI + ADK)"]
+        Routes["POST /api/story (SSE)"]
+        Agent["ADK Agent: Elora\ngemini-3.1-pro-preview"]
+        ImgTool["generate_image()"]
+        MusicTool["generate_music()"]
+        ImageCache["_image_cache/"]
+        MusicCache["_music_cache/"]
+    end
+
+    subgraph Google["Google Cloud (Vertex AI)"]
+        Gemini["gemini-3.1-pro-preview"]
+        Imagen["Imagen 4\nimagen-4.0-generate-001"]
+        Lyria["Lyria 2\nlyria-002"]
+        FS[(Firestore)]
+    end
+
+    SP -->|prompt| Hook
+    Hook -->|POST /api/story| Routes
+    Routes --> Agent
+    Agent -->|LLM brain| Gemini
+    Agent -->|tool call| ImgTool
+    Agent -->|tool call| MusicTool
+    ImgTool --> Imagen
+    ImgTool --> ImageCache
+    MusicTool --> Lyria
+    MusicTool --> MusicCache
+    Routes -->|SSE: text/image/music/done| Hook
+    Hook --> SV
+    Hook --> HUD
+```
+
+---
+
+## 💡 For the Next Agent — Context
+
+- **Hackathon deadline:** 2026-03-16 17:00 PDT. Roughly 24 hours from now.
+- **The code is written but NOT tested.** The most important thing is to run the backend, fix any package errors (especially google-adk), and verify end-to-end SSE story generation works.
+- **Do not redesign the architecture.** It is correct for the Creative Storyteller hackathon category.
+- **The 3D scene / avatar is still there** as an atmospheric background. It does not interact with the story anymore (no lip-sync, no emotion changes). That's intentional.
+- **If google-adk is broken**, the quickest fallback is to replace `agent.py` and the SSE route with a direct `genai_client.aio.models.generate_content()` call using `google.genai.types.FunctionDeclaration` for the tools. The rest of the code (SSE route, frontend) stays the same.
+- **Firebase auth** is gated by `FIREBASE_ENABLED=true`. Set `FIREBASE_ENABLED=false` in `.env` during local testing to skip auth and get to the story faster.

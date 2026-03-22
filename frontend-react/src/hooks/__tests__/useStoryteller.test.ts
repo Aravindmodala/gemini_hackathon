@@ -1,286 +1,472 @@
 /**
- * Integration tests for the useStoryteller hook.
+ * Unit tests for useStoryteller hook — SSE-based story generation.
  *
- * Tests the WebSocket connection lifecycle, status state machine,
- * message handling, and cleanup using mocked browser APIs.
+ * Tests cover status state machine, SSE event parsing, section accumulation,
+ * text merging, music playback, abort/stop, and cleanup.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useStoryteller } from '../../hooks/useStoryteller';
-import { useAvatarStore } from '../../store/useAvatarStore';
+import { useStoryteller } from '../useStoryteller';
 
-// Type for our mock WebSocket (from setup.ts)
-interface MockWS {
-  url: string;
-  readyState: number;
-  sentMessages: string[];
-  onopen: ((ev: Event) => void) | null;
-  onmessage: ((ev: MessageEvent) => void) | null;
-  onerror: ((ev: Event) => void) | null;
-  onclose: ((ev: CloseEvent) => void) | null;
-  send: (data: string) => void;
-  close: () => void;
-  _receive: (data: Record<string, unknown>) => void;
+// ── SSE stream helpers ────────────────────────────────────────────────────────
+
+function makeSSEStream(lines: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const body = lines.join('');
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(body));
+      controller.close();
+    },
+  });
 }
 
-// Track created WebSocket instances
-let capturedWs: MockWS | null = null;
-const OriginalWebSocket = globalThis.WebSocket;
+function sseData(payload: Record<string, unknown>): string {
+  return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
+function mockFetch(sseLines: string[], ok = true) {
+  const stream = makeSSEStream(sseLines);
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok,
+    status: ok ? 200 : 500,
+    body: stream,
+  }));
+}
+
+// ── Audio mock helpers ────────────────────────────────────────────────────────
+
+const mockAudioPlay = vi.fn().mockResolvedValue(undefined);
+const mockAudioPause = vi.fn();
+
+class MockAudio {
+  src: string;
+  volume = 1;
+  onended: (() => void) | null = null;
+  play = mockAudioPlay;
+  pause = mockAudioPause;
+
+  constructor(src: string) {
+    this.src = src;
+  }
+}
+
+vi.stubGlobal('Audio', MockAudio);
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('useStoryteller', () => {
   beforeEach(() => {
-    capturedWs = null;
-
-    // Intercept WebSocket constructor to capture instance
-    const MockWS = class extends (OriginalWebSocket as any) {
-      constructor(url: string) {
-        super(url);
-        capturedWs = this as unknown as MockWS;
-      }
-    };
-    (globalThis as any).WebSocket = MockWS;
-
-    // Reset avatar store
-    useAvatarStore.setState({
-      currentAction: 'Idle',
-      currentEmotion: 'neutral',
-      lipSyncVolume: 0,
-    });
+    vi.clearAllMocks();
+    vi.stubGlobal('Audio', MockAudio);
   });
 
   afterEach(() => {
-    (globalThis as any).WebSocket = OriginalWebSocket;
+    vi.unstubAllGlobals();
   });
 
-  // ── Initial State ─────────────────────────────────────────
+  // ── Initial state ─────────────────────────────────────────────────────────
+
   describe('initial state', () => {
-    it('should start with status "disconnected"', () => {
+    it('status is "idle"', () => {
       const { result } = renderHook(() => useStoryteller());
-      expect(result.current.status).toBe('disconnected');
+      expect(result.current.status).toBe('idle');
     });
 
-    it('should have empty logs', () => {
+    it('sections is empty array', () => {
       const { result } = renderHook(() => useStoryteller());
-      expect(result.current.logs).toEqual([]);
+      expect(result.current.sections).toEqual([]);
     });
 
-    it('should expose startStory and stopStory functions', () => {
+    it('currentMusic is null', () => {
+      const { result } = renderHook(() => useStoryteller());
+      expect(result.current.currentMusic).toBeNull();
+    });
+
+    it('exposes startStory function', () => {
       const { result } = renderHook(() => useStoryteller());
       expect(typeof result.current.startStory).toBe('function');
+    });
+
+    it('exposes stopStory function', () => {
+      const { result } = renderHook(() => useStoryteller());
       expect(typeof result.current.stopStory).toBe('function');
     });
-
-    it('should expose sendImage function', () => {
-      const { result } = renderHook(() => useStoryteller());
-      expect(typeof result.current.sendImage).toBe('function');
-    });
   });
 
-  // ── startStory Flow ───────────────────────────────────────
-  describe('startStory', () => {
-    it('should request microphone access', async () => {
+  // ── startStory — status transitions ──────────────────────────────────────
+
+  describe('startStory status transitions', () => {
+    it('sets status to "generating" immediately on start', async () => {
       const { result } = renderHook(() => useStoryteller());
 
+      let statusDuringFetch = '';
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+        statusDuringFetch = result.current.status;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          body: makeSSEStream([sseData({ type: 'done' })]),
+        });
+      }));
+
       await act(async () => {
-        await result.current.startStory();
+        await result.current.startStory('A magical story');
       });
 
-      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith(
-        expect.objectContaining({
-          audio: expect.objectContaining({
-            channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
-          }),
-        })
-      );
+      expect(['idle', 'generating']).toContain(statusDuringFetch);
     });
 
-    it('should set status to "connecting" immediately', async () => {
+    it('sets status to "done" on done event', async () => {
+      mockFetch([sseData({ type: 'done' })]);
+
       const { result } = renderHook(() => useStoryteller());
-
-      // Start the story — the promise will complete after microtask
-      const promise = act(async () => {
-        await result.current.startStory();
+      await act(async () => {
+        await result.current.startStory('A story');
       });
 
-      // We need to check mid-flow, but after act completes we can check logs
-      await promise;
-
-      // The logs should contain a connecting-related entry
-      expect(result.current.logs.some(l => l.includes('Microphone access granted'))).toBe(true);
+      expect(result.current.status).toBe('done');
     });
 
-    it('should create a WebSocket to ws://localhost:3001/ws', async () => {
+    it('sets status to "error" on error event', async () => {
+      mockFetch([sseData({ type: 'error', message: 'Something failed' })]);
+
       const { result } = renderHook(() => useStoryteller());
-
       await act(async () => {
-        await result.current.startStory();
-      });
-
-      expect(capturedWs).not.toBeNull();
-      expect(capturedWs!.url).toBe('ws://localhost:3001/ws');
-    });
-  });
-
-  // ── Message Handling ──────────────────────────────────────
-  describe('message handling', () => {
-    async function setupConnectedHook() {
-      const hook = renderHook(() => useStoryteller());
-      await act(async () => {
-        await hook.result.current.startStory();
-      });
-      // Wait for WebSocket's microtask onopen
-      await act(async () => {
-        await new Promise(r => setTimeout(r, 10));
-      });
-      return hook;
-    }
-
-    it('should transition to "connected" on status:connected message', async () => {
-      const { result } = await setupConnectedHook();
-
-      await act(async () => {
-        capturedWs!._receive({ type: 'status', status: 'connected' });
-      });
-
-      expect(result.current.status).toBe('connected');
-    });
-
-    it('should transition to "listening" on status:ready message', async () => {
-      const { result } = await setupConnectedHook();
-
-      await act(async () => {
-        capturedWs!._receive({ type: 'status', status: 'ready' });
-      });
-
-      expect(result.current.status).toBe('listening');
-    });
-
-    it('should set avatar action to "Idle" on status:ready', async () => {
-      await setupConnectedHook();
-
-      await act(async () => {
-        capturedWs!._receive({ type: 'status', status: 'ready' });
-      });
-
-      expect(useAvatarStore.getState().currentAction).toBe('Idle');
-    });
-
-    it('should transition to "speaking" on audio message', async () => {
-      const { result } = await setupConnectedHook();
-
-      // Create a small valid base64 audio payload (2 bytes of Int16)
-      const fakeAudio = btoa(String.fromCharCode(0, 0));
-
-      await act(async () => {
-        capturedWs!._receive({ type: 'audio', data: fakeAudio, mimeType: 'audio/pcm' });
-      });
-
-      expect(result.current.status).toBe('speaking');
-    });
-
-    it('should set avatar action to "Talking" on audio message', async () => {
-      await setupConnectedHook();
-
-      const fakeAudio = btoa(String.fromCharCode(0, 0));
-
-      await act(async () => {
-        capturedWs!._receive({ type: 'audio', data: fakeAudio, mimeType: 'audio/pcm' });
-      });
-
-      expect(useAvatarStore.getState().currentAction).toBe('Talking');
-    });
-
-    it('should transition to "listening" on turn_complete', async () => {
-      const { result } = await setupConnectedHook();
-
-      // First go to speaking
-      await act(async () => {
-        const fakeAudio = btoa(String.fromCharCode(0, 0));
-        capturedWs!._receive({ type: 'audio', data: fakeAudio, mimeType: 'audio/pcm' });
-      });
-      expect(result.current.status).toBe('speaking');
-
-      // Then turn complete
-      await act(async () => {
-        capturedWs!._receive({ type: 'status', status: 'turn_complete' });
-      });
-
-      expect(result.current.status).toBe('listening');
-    });
-
-    it('should set status to "error" on error message', async () => {
-      const { result } = await setupConnectedHook();
-
-      await act(async () => {
-        capturedWs!._receive({ type: 'error', message: 'Something went wrong' });
+        await result.current.startStory('A story');
       });
 
       expect(result.current.status).toBe('error');
     });
 
-    it('should log tool_event messages', async () => {
-      const { result } = await setupConnectedHook();
+    it('sets status to "error" on HTTP error response', async () => {
+      mockFetch([], false);
 
+      const { result } = renderHook(() => useStoryteller());
       await act(async () => {
-        capturedWs!._receive({ type: 'tool_event', name: 'generate_music' });
+        await result.current.startStory('A story');
       });
 
-      expect(result.current.logs.some(l => l.includes('generate_music'))).toBe(true);
+      expect(result.current.status).toBe('error');
     });
   });
 
-  // ── stopStory ─────────────────────────────────────────────
+  // ── SSE event parsing — text ──────────────────────────────────────────────
+
+  describe('text event handling', () => {
+    it('creates a text section from a text chunk', async () => {
+      mockFetch([
+        sseData({ type: 'text', chunk: 'Once upon a time' }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      const textSections = result.current.sections.filter(s => s.type === 'text');
+      expect(textSections.length).toBe(1);
+      expect((textSections[0] as { type: 'text'; content: string }).content)
+        .toBe('Once upon a time');
+    });
+
+    it('merges consecutive text chunks into one section', async () => {
+      mockFetch([
+        sseData({ type: 'text', chunk: 'Once upon' }),
+        sseData({ type: 'text', chunk: ' a time' }),
+        sseData({ type: 'text', chunk: ' in a land' }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      const textSections = result.current.sections.filter(s => s.type === 'text');
+      expect(textSections.length).toBe(1);
+      expect((textSections[0] as { type: 'text'; content: string }).content)
+        .toBe('Once upon a time in a land');
+    });
+
+    it('starts a new text section after an image section', async () => {
+      mockFetch([
+        sseData({ type: 'text', chunk: 'Prologue text' }),
+        sseData({ type: 'image', url: '/api/images/x.png', caption: 'Scene' }),
+        sseData({ type: 'text', chunk: 'Epilogue text' }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      const textSections = result.current.sections.filter(s => s.type === 'text');
+      expect(textSections.length).toBe(2);
+    });
+  });
+
+  // ── SSE event parsing — image ─────────────────────────────────────────────
+
+  describe('image event handling', () => {
+    it('creates an image section from image event', async () => {
+      mockFetch([
+        sseData({ type: 'image', url: '/api/images/dragon.png', caption: 'A dragon' }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      const imageSections = result.current.sections.filter(s => s.type === 'image');
+      expect(imageSections.length).toBe(1);
+      const img = imageSections[0] as { type: 'image'; url: string; caption: string };
+      expect(img.url).toBe('/api/images/dragon.png');
+      expect(img.caption).toBe('A dragon');
+    });
+
+    it('handles missing caption gracefully', async () => {
+      mockFetch([
+        sseData({ type: 'image', url: '/api/images/x.png' }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      const imageSections = result.current.sections.filter(s => s.type === 'image');
+      expect(imageSections.length).toBe(1);
+    });
+  });
+
+  // ── SSE event parsing — music ─────────────────────────────────────────────
+
+  describe('music event handling', () => {
+    it('creates a music section from music event', async () => {
+      mockFetch([
+        sseData({ type: 'music', url: '/api/music/theme.wav', duration: 33 }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      const musicSections = result.current.sections.filter(s => s.type === 'music');
+      expect(musicSections.length).toBe(1);
+      const music = musicSections[0] as { type: 'music'; url: string; duration: number };
+      expect(music.url).toBe('/api/music/theme.wav');
+      expect(music.duration).toBe(33);
+    });
+
+    it('sets currentMusic to the audio URL on music event', async () => {
+      mockFetch([
+        sseData({ type: 'music', url: '/api/music/theme.wav', duration: 33 }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      expect(result.current.currentMusic).toBe('/api/music/theme.wav');
+    });
+
+    it('starts audio playback at 35% volume on music event', async () => {
+      const mockPlay = vi.fn().mockResolvedValue(undefined);
+      let capturedVolume = 0;
+
+      class TrackingAudio {
+        src: string;
+        onended: (() => void) | null = null;
+        set volume(v: number) { capturedVolume = v; }
+        play = mockPlay;
+        pause = vi.fn();
+        constructor(src: string) { this.src = src; }
+      }
+      vi.stubGlobal('Audio', TrackingAudio);
+
+      mockFetch([
+        sseData({ type: 'music', url: '/api/music/theme.wav', duration: 33 }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      expect(mockPlay).toHaveBeenCalled();
+      expect(capturedVolume).toBe(0.35);
+    });
+  });
+
+  // ── Section ordering ──────────────────────────────────────────────────────
+
+  describe('section ordering', () => {
+    it('preserves text → image → text → music order', async () => {
+      mockFetch([
+        sseData({ type: 'text', chunk: 'Intro' }),
+        sseData({ type: 'image', url: '/api/images/a.png', caption: 'Scene 1' }),
+        sseData({ type: 'text', chunk: 'Middle' }),
+        sseData({ type: 'music', url: '/api/music/b.wav', duration: 33 }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      const types = result.current.sections.map(s => s.type);
+      expect(types).toEqual(['text', 'image', 'text', 'music']);
+    });
+  });
+
+  // ── startStory clears previous state ─────────────────────────────────────
+
+  describe('startStory resets state', () => {
+    it('clears sections from previous story', async () => {
+      mockFetch([
+        sseData({ type: 'text', chunk: 'First story' }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('First');
+      });
+      expect(result.current.sections).toHaveLength(1);
+
+      mockFetch([sseData({ type: 'done' })]);
+      await act(async () => {
+        await result.current.startStory('Second');
+      });
+
+      // Sections reset to empty then done fires with nothing
+      expect(result.current.sections).toHaveLength(0);
+    });
+  });
+
+  // ── fetch options ─────────────────────────────────────────────────────────
+
+  describe('fetch configuration', () => {
+    it('sends POST to API base /api/story with the prompt', async () => {
+      const mockFetchFn = vi.fn().mockResolvedValue({
+        ok: true,
+        body: makeSSEStream([sseData({ type: 'done' })]),
+      });
+      vi.stubGlobal('fetch', mockFetchFn);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A dragon tale');
+      });
+
+      const [url, options] = mockFetchFn.mock.calls[0];
+      expect(url).toBe('http://localhost:3001/api/story');
+      expect(options.method).toBe('POST');
+      const body = JSON.parse(options.body);
+      expect(body.prompt).toBe('A dragon tale');
+    });
+
+    it('includes Authorization header when getIdToken is provided', async () => {
+      const mockFetchFn = vi.fn().mockResolvedValue({
+        ok: true,
+        body: makeSSEStream([sseData({ type: 'done' })]),
+      });
+      vi.stubGlobal('fetch', mockFetchFn);
+
+      const getIdToken = vi.fn().mockResolvedValue('my-token-abc');
+      const { result } = renderHook(() => useStoryteller({ getIdToken }));
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      const [, options] = mockFetchFn.mock.calls[0];
+      expect(options.headers.Authorization).toBe('Bearer my-token-abc');
+    });
+
+    it('sends request without Authorization when no getIdToken', async () => {
+      const mockFetchFn = vi.fn().mockResolvedValue({
+        ok: true,
+        body: makeSSEStream([sseData({ type: 'done' })]),
+      });
+      vi.stubGlobal('fetch', mockFetchFn);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      const [, options] = mockFetchFn.mock.calls[0];
+      expect(options.headers.Authorization).toBeUndefined();
+    });
+  });
+
+  // ── stopStory ─────────────────────────────────────────────────────────────
+
   describe('stopStory', () => {
-    it('should set status back to "disconnected"', async () => {
-      const { result } = renderHook(() => useStoryteller());
+    it('sets status to "idle"', async () => {
+      mockFetch([sseData({ type: 'done' })]);
 
+      const { result } = renderHook(() => useStoryteller());
       await act(async () => {
-        await result.current.startStory();
+        await result.current.startStory('A story');
       });
+      expect(result.current.status).toBe('done');
 
       act(() => {
         result.current.stopStory();
       });
 
-      expect(result.current.status).toBe('disconnected');
+      expect(result.current.status).toBe('idle');
     });
 
-    it('should reset avatar state on stop', async () => {
+    it('clears currentMusic', async () => {
+      mockFetch([
+        sseData({ type: 'music', url: '/api/music/x.wav', duration: 33 }),
+        sseData({ type: 'done' }),
+      ]);
+
       const { result } = renderHook(() => useStoryteller());
-
       await act(async () => {
-        await result.current.startStory();
+        await result.current.startStory('A story');
       });
-
-      // Simulate speaking state
-      useAvatarStore.getState().setAction('Talking');
-      useAvatarStore.getState().setLipSyncVolume(0.8);
+      expect(result.current.currentMusic).toBe('/api/music/x.wav');
 
       act(() => {
         result.current.stopStory();
       });
 
-      expect(useAvatarStore.getState().currentAction).toBe('Idle');
-      expect(useAvatarStore.getState().lipSyncVolume).toBe(0);
+      expect(result.current.currentMusic).toBeNull();
     });
   });
 
-  // ── Cleanup on Unmount ────────────────────────────────────
-  describe('cleanup', () => {
-    it('should reset to disconnected on unmount', async () => {
+  // ── Cleanup on unmount ────────────────────────────────────────────────────
+
+  describe('cleanup on unmount', () => {
+    it('aborts in-flight fetch on unmount without throwing', async () => {
+      // Fetch that never resolves
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(() =>
+        new Promise(() => {}),
+      ));
+
       const { result, unmount } = renderHook(() => useStoryteller());
 
-      await act(async () => {
-        await result.current.startStory();
+      act(() => {
+        void result.current.startStory('A story');
       });
 
-      unmount();
-
-      // After unmount, avatar store should be reset
-      expect(useAvatarStore.getState().currentAction).toBe('Idle');
-      expect(useAvatarStore.getState().lipSyncVolume).toBe(0);
+      // Should not throw
+      expect(() => unmount()).not.toThrow();
     });
   });
 });

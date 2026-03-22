@@ -1,8 +1,47 @@
-import { Suspense } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { Environment, ContactShadows, OrbitControls, Sparkles } from '@react-three/drei';
+import { Suspense, useRef, useEffect } from 'react';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
+import { Environment, ContactShadows, Sparkles } from '@react-three/drei';
+import * as THREE from 'three';
 import { Avatar } from './Avatar';
 import { PostFX } from './PostFX';
+
+const MOBILE_BREAKPOINT = 768;
+const DESKTOP_POS: [number, number, number] = [0, 1.0, 3.8];
+const MOBILE_POS: [number, number, number] = [0, 1.2, 5.5];
+const DESKTOP_FOV = 55;
+const MOBILE_FOV = 65;
+const LERP_FACTOR = 0.04;
+const LOOK_AT = new THREE.Vector3(0, 1.0, 0);
+
+export function ResponsiveCamera() {
+  const { camera, size } = useThree();
+  const targetPos = useRef<[number, number, number]>(DESKTOP_POS);
+  const prevIsMobile = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    const isMobile = size.width < MOBILE_BREAKPOINT;
+    if (isMobile === prevIsMobile.current) return;
+    prevIsMobile.current = isMobile;
+
+    targetPos.current = isMobile ? MOBILE_POS : DESKTOP_POS;
+
+    const perspCam = camera as THREE.PerspectiveCamera;
+    if (perspCam.fov !== undefined) {
+      perspCam.fov = isMobile ? MOBILE_FOV : DESKTOP_FOV;
+      perspCam.updateProjectionMatrix();
+    }
+  }, [size.width, camera]);
+
+  useFrame(() => {
+    const target = targetPos.current;
+    camera.position.x = THREE.MathUtils.lerp(camera.position.x, target[0], LERP_FACTOR);
+    camera.position.y = THREE.MathUtils.lerp(camera.position.y, target[1], LERP_FACTOR);
+    camera.position.z = THREE.MathUtils.lerp(camera.position.z, target[2], LERP_FACTOR);
+    camera.lookAt(LOOK_AT);
+  });
+
+  return null;
+}
 
 export function Scene() {
   return (
@@ -10,9 +49,10 @@ export function Scene() {
       <Canvas
         shadows
         gl={{ antialias: true, alpha: false }}
-        camera={{ position: [0, 1.0, 3.8], fov: 55 }}
         style={{ background: 'transparent' }}
       >
+        <ResponsiveCamera />
+
         {/* Cinematic ambient */}
         <ambientLight intensity={0.3} color="#a78bfa" />
 
@@ -70,15 +110,6 @@ export function Scene() {
             color="#1e1040"
           />
         </Suspense>
-
-        {/* Orbit controls — limited so you always see the avatar nicely */}
-        <OrbitControls
-          enablePan={false}
-          enableZoom={false}
-          minPolarAngle={Math.PI / 3}
-          maxPolarAngle={Math.PI / 2.1}
-          target={[0, 1.0, 0]}
-        />
 
         {/* Post-processing */}
         <PostFX />

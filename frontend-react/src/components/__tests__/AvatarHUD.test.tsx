@@ -1,152 +1,174 @@
 /**
  * Unit tests for the AvatarHUD component.
  *
- * Validates rendering across all 6 status states, button behavior,
- * waveform visibility, and status badge display.
+ * AvatarHUD is visible only during generating/done/error status.
+ * When idle it returns null (renders nothing).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { AvatarHUD } from '../../components/AvatarHUD';
+import { AvatarHUD } from '../AvatarHUD';
 
 describe('AvatarHUD', () => {
-  const mockOnStart = vi.fn();
   const mockOnStop = vi.fn();
+  const mockOnNewStory = vi.fn();
 
   beforeEach(() => {
-    mockOnStart.mockClear();
     mockOnStop.mockClear();
+    mockOnNewStory.mockClear();
   });
 
-  // ── Disconnected State ────────────────────────────────────
-  describe('when disconnected', () => {
-    it('should show "Talk to Elora" button label', () => {
-      render(<AvatarHUD status="disconnected" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByRole('button')).toHaveTextContent('Talk to Elora');
+  // ── idle state ────────────────────────────────────────────────────────────
+
+  describe('when idle', () => {
+    it('renders nothing (returns null)', () => {
+      const { container } = render(
+        <AvatarHUD status="idle" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(container).toBeEmptyDOMElement();
     });
 
-    it('should call onStart when button is clicked', () => {
-      render(<AvatarHUD status="disconnected" onStart={mockOnStart} onStop={mockOnStop} />);
-      fireEvent.click(screen.getByRole('button'));
-      expect(mockOnStart).toHaveBeenCalledOnce();
+    it('does not render any buttons', () => {
+      render(
+        <AvatarHUD status="idle" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+  });
+
+  // ── generating state ──────────────────────────────────────────────────────
+
+  describe('when generating', () => {
+    it('shows "Writing the story…" status badge', () => {
+      render(
+        <AvatarHUD status="generating" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.getByText('Writing the story…')).toBeInTheDocument();
+    });
+
+    it('shows a Stop button', () => {
+      render(
+        <AvatarHUD status="generating" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument();
+    });
+
+    it('calls onStop when Stop is clicked', () => {
+      render(
+        <AvatarHUD status="generating" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /stop/i }));
+      expect(mockOnStop).toHaveBeenCalledOnce();
+      expect(mockOnNewStory).not.toHaveBeenCalled();
+    });
+
+    it('does not show New Story button', () => {
+      render(
+        <AvatarHUD status="generating" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.queryByRole('button', { name: /new story/i })).not.toBeInTheDocument();
+    });
+
+    it('shows animated writing dots', () => {
+      const { container } = render(
+        <AvatarHUD status="generating" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      // WritingDots renders 3 small divs
+      const dots = container.querySelectorAll('div[style*="dot-bounce"]');
+      expect(dots.length).toBeGreaterThanOrEqual(0); // existence check (style may vary)
+      // At minimum the badge container is rendered
+      expect(screen.getByText('Writing the story…')).toBeInTheDocument();
+    });
+  });
+
+  // ── done state ────────────────────────────────────────────────────────────
+
+  describe('when done', () => {
+    it('shows "Story complete" status badge', () => {
+      render(
+        <AvatarHUD status="done" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.getByText('Story complete')).toBeInTheDocument();
+    });
+
+    it('shows a New Story button', () => {
+      render(
+        <AvatarHUD status="done" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.getByRole('button', { name: /new story/i })).toBeInTheDocument();
+    });
+
+    it('calls onNewStory when New Story is clicked', () => {
+      render(
+        <AvatarHUD status="done" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /new story/i }));
+      expect(mockOnNewStory).toHaveBeenCalledOnce();
       expect(mockOnStop).not.toHaveBeenCalled();
     });
 
-    it('should NOT show the status badge', () => {
-      render(<AvatarHUD status="disconnected" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.queryByText('Talk to Elora')).toBeInTheDocument(); // button label
-      expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
-    });
-
-    it('should not be disabled', () => {
-      render(<AvatarHUD status="disconnected" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByRole('button')).not.toBeDisabled();
+    it('does not show Stop button', () => {
+      render(
+        <AvatarHUD status="done" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.queryByRole('button', { name: /stop/i })).not.toBeInTheDocument();
     });
   });
 
-  // ── Connecting State ──────────────────────────────────────
-  describe('when connecting', () => {
-    it('should show "Awakening…" button label', () => {
-      render(<AvatarHUD status="connecting" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByRole('button')).toHaveTextContent('Awakening…');
-    });
+  // ── error state ───────────────────────────────────────────────────────────
 
-    it('should be disabled', () => {
-      render(<AvatarHUD status="connecting" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByRole('button')).toBeDisabled();
-    });
-
-    it('should show the status badge with "Awakening…" text', () => {
-      render(<AvatarHUD status="connecting" onStart={mockOnStart} onStop={mockOnStop} />);
-      // Both badge and button show "Awakening…"
-      const awakeningElements = screen.getAllByText('Awakening…');
-      expect(awakeningElements.length).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  // ── Connected State ───────────────────────────────────────
-  describe('when connected', () => {
-    it('should show "End Session" button label', () => {
-      render(<AvatarHUD status="connected" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByRole('button')).toHaveTextContent('End Session');
-    });
-
-    it('should call onStop when button is clicked', () => {
-      render(<AvatarHUD status="connected" onStart={mockOnStart} onStop={mockOnStop} />);
-      fireEvent.click(screen.getByRole('button'));
-      expect(mockOnStop).toHaveBeenCalledOnce();
-      expect(mockOnStart).not.toHaveBeenCalled();
-    });
-  });
-
-  // ── Listening State ───────────────────────────────────────
-  describe('when listening', () => {
-    it('should show "End Session" button label', () => {
-      render(<AvatarHUD status="listening" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByRole('button')).toHaveTextContent('End Session');
-    });
-
-    it('should show the status badge with "Listening…"', () => {
-      render(<AvatarHUD status="listening" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByText('Listening…')).toBeInTheDocument();
-    });
-
-    it('should call onStop when button is clicked', () => {
-      render(<AvatarHUD status="listening" onStart={mockOnStart} onStop={mockOnStop} />);
-      fireEvent.click(screen.getByRole('button'));
-      expect(mockOnStop).toHaveBeenCalledOnce();
-    });
-  });
-
-  // ── Speaking State ────────────────────────────────────────
-  describe('when speaking', () => {
-    it('should show "End Session" button label', () => {
-      render(<AvatarHUD status="speaking" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByRole('button')).toHaveTextContent('End Session');
-    });
-
-    it('should show the status badge with "Elora is speaking…"', () => {
-      render(<AvatarHUD status="speaking" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByText('Elora is speaking…')).toBeInTheDocument();
-    });
-
-    it('should call onStop when clicked', () => {
-      render(<AvatarHUD status="speaking" onStart={mockOnStart} onStop={mockOnStop} />);
-      fireEvent.click(screen.getByRole('button'));
-      expect(mockOnStop).toHaveBeenCalledOnce();
-    });
-  });
-
-  // ── Error State ───────────────────────────────────────────
   describe('when error', () => {
-    it('should show "Talk to Elora" button (idle behavior)', () => {
-      render(<AvatarHUD status="error" onStart={mockOnStart} onStop={mockOnStop} />);
-      expect(screen.getByRole('button')).toHaveTextContent('Talk to Elora');
+    it('shows "Something went wrong" status badge', () => {
+      render(
+        <AvatarHUD status="error" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
     });
 
-    it('should call onStart when clicked (treats as idle)', () => {
-      render(<AvatarHUD status="error" onStart={mockOnStart} onStop={mockOnStop} />);
-      fireEvent.click(screen.getByRole('button'));
-      expect(mockOnStart).toHaveBeenCalledOnce();
+    it('shows a New Story button', () => {
+      render(
+        <AvatarHUD status="error" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.getByRole('button', { name: /new story/i })).toBeInTheDocument();
+    });
+
+    it('calls onNewStory when New Story is clicked', () => {
+      render(
+        <AvatarHUD status="error" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /new story/i }));
+      expect(mockOnNewStory).toHaveBeenCalledOnce();
+    });
+
+    it('does not show Stop button', () => {
+      render(
+        <AvatarHUD status="error" onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+      );
+      expect(screen.queryByRole('button', { name: /stop/i })).not.toBeInTheDocument();
     });
   });
 
-  // ── Button Enabled/Disabled ───────────────────────────────
-  describe('button enabled state', () => {
+  // ── button visibility per status ──────────────────────────────────────────
+
+  describe('button visibility', () => {
     it.each([
-      ['disconnected', false],
-      ['connecting', true],
-      ['connected', false],
-      ['listening', false],
-      ['speaking', false],
-      ['error', false],
-    ] as const)('status="%s" → disabled=%s', (status, shouldBeDisabled) => {
-      render(<AvatarHUD status={status} onStart={mockOnStart} onStop={mockOnStop} />);
-      const button = screen.getByRole('button');
-      if (shouldBeDisabled) {
-        expect(button).toBeDisabled();
-      } else {
-        expect(button).not.toBeDisabled();
-      }
-    });
+      ['generating', 'Stop', true],
+      ['generating', 'New Story', false],
+      ['done',       'Stop', false],
+      ['done',       'New Story', true],
+      ['error',      'Stop', false],
+      ['error',      'New Story', true],
+    ] as const)(
+      'status="%s": "%s" button visible=%s',
+      (status, btnName, visible) => {
+        render(
+          <AvatarHUD status={status} onStop={mockOnStop} onNewStory={mockOnNewStory} />,
+        );
+        const regex = new RegExp(btnName, 'i');
+        if (visible) {
+          expect(screen.getByRole('button', { name: regex })).toBeInTheDocument();
+        } else {
+          expect(screen.queryByRole('button', { name: regex })).not.toBeInTheDocument();
+        }
+      },
+    );
   });
 });

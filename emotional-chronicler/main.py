@@ -1,11 +1,3 @@
-"""
-The Emotional Chronicler — application entrypoint.
-
-Usage::
-
-    uvicorn main:app --port 3001 --reload
-"""
-
 import logging
 import sys
 

@@ -1,5 +1,1 @@
-"""Core — the agent brain."""
-
-from .session import GeminiSession
-
-__all__ = ["GeminiSession"]
+"""Core — ADK agent, Firebase auth, and session store."""

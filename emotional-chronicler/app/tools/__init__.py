@@ -49,9 +49,17 @@ class ToolRegistry:
                     self._tools[tool.name] = tool
                     logger.info(f"[Tools] ✅ Registered: {tool.name}")
 
-    def get_declarations(self) -> list[dict]:
-        """Return all tool declarations for the Gemini setup message."""
-        return [tool.declaration for tool in self._tools.values()]
+    def get_declarations(self, *, exclude_builtin: bool = False) -> list[dict]:
+        """Return tool declarations for the Gemini setup message.
+
+        Args:
+            exclude_builtin: If True, omit built-in tools (e.g. googleSearch)
+                that cannot be combined with functionDeclarations in the Live API.
+        """
+        tools = self._tools.values()
+        if exclude_builtin:
+            tools = [t for t in tools if not t.is_builtin]
+        return [tool.declaration for tool in tools]
 
     async def dispatch(self, name: str, **kwargs) -> dict:
         """

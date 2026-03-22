@@ -3,7 +3,6 @@
  *
  * Validates state defaults, setter actions, and state isolation.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
 import { useAvatarStore } from '../../store/useAvatarStore';
 
 describe('useAvatarStore', () => {

@@ -41,17 +41,74 @@ export function Avatar(props: any) {
   const blinkTimer    = useRef(Math.random() * 3 + 2); // next blink in 2–5s
   const blinkProgress = useRef(0); // 0=open, 1=closed
 
+  // ── Material lifecycle tracking ──────────────────────────────
+  const createdMaterials = useRef<THREE.MeshPhysicalMaterial[]>([]);
+
   // ── One-time setup ─────────────────────────────────────────────
   useEffect(() => {
+    const SKIN_MESH_NAMES = new Set([
+      'wolf3d_head',
+      'wolf3d_body',
+      'wolf3d_hands',
+    ]);
+
+    const materialsThisRun: THREE.MeshPhysicalMaterial[] = [];
+    const materialRefCounts = new Map<THREE.Material, number>();
+    const oldMaterialsToDispose = new Set<THREE.Material>();
+
+    // Count original material references first so shared GLTF materials
+    // are only disposed once all references are replaced.
+    scene.traverse((child: any) => {
+      if (!child.isMesh) return;
+      const material = child.material;
+      if (Array.isArray(material)) {
+        material.forEach((mat) => {
+          if (mat instanceof THREE.Material) {
+            materialRefCounts.set(mat, (materialRefCounts.get(mat) ?? 0) + 1);
+          }
+        });
+      } else if (material instanceof THREE.Material) {
+        materialRefCounts.set(material, (materialRefCounts.get(material) ?? 0) + 1);
+      }
+    });
+
     scene.traverse((child: any) => {
       if (!child.isMesh) return;
       child.castShadow    = true;
       child.receiveShadow = true;
       child.frustumCulled = false;
 
+      if (SKIN_MESH_NAMES.has(child.name.toLowerCase())) {
+        if (Array.isArray(child.material)) return;
+
+        const oldMat = child.material as THREE.MeshStandardMaterial & THREE.Material;
+        const skinMat = new THREE.MeshPhysicalMaterial({
+          map: oldMat.map ?? undefined,
+          normalMap: oldMat.normalMap ?? undefined,
+          roughnessMap: (oldMat as any).roughnessMap ?? undefined,
+          metalnessMap: (oldMat as any).metalnessMap ?? undefined,
+          aoMap: (oldMat as any).aoMap ?? undefined,
+          roughness: 0.45,
+          transmission: 0.1,
+          thickness: 0.5,
+          envMapIntensity: 1.5,
+          transparent: oldMat.transparent,
+          alphaTest: oldMat.alphaTest,
+          side: oldMat.side,
+        });
+        materialsThisRun.push(skinMat);
+
+        const refsLeft = Math.max(0, (materialRefCounts.get(oldMat) ?? 0) - 1);
+        materialRefCounts.set(oldMat, refsLeft);
+        if (refsLeft === 0) {
+          oldMaterialsToDispose.add(oldMat);
+        }
+
+        child.material = skinMat;
+      }
+
       if (child.morphTargetDictionary) {
         const keys = Object.keys(child.morphTargetDictionary);
-        // Log so we can see what morph target names the model has
         if (keys.length > 5) {
           console.log('[Avatar] Morph targets on', child.name, ':', keys);
         }
@@ -65,6 +122,9 @@ export function Avatar(props: any) {
         }
       }
     });
+
+    createdMaterials.current = materialsThisRun;
+    oldMaterialsToDispose.forEach((mat) => mat.dispose());
 
     // Fallback: if name-based detection failed, take the mesh with the most morph targets
     if (!faceMeshRef.current) {
@@ -103,9 +163,14 @@ export function Avatar(props: any) {
     if (leftForeArmRef.current)  leftForeArmRef.current.rotation.z  = -0.1;
 
     // Start off-screen left
-    if (group.current) {
+    if (group.current?.position) {
       group.current.position.x = ENTRY_START_X;
     }
+
+    return () => {
+      createdMaterials.current.forEach(mat => mat.dispose());
+      createdMaterials.current = [];
+    };
   }, [scene]);
 
   // ── Play default idle animation (if any) ──────────────────────
@@ -134,7 +199,7 @@ export function Avatar(props: any) {
       entryProgress.current = Math.min(1, entryProgress.current + delta / ENTRY_DURATION);
       // Ease out cubic
       const ease = 1 - Math.pow(1 - entryProgress.current, 3);
-      if (group.current) {
+      if (group.current?.position) {
         group.current.position.x = THREE.MathUtils.lerp(ENTRY_START_X, 0, ease);
       }
       if (entryProgress.current >= 1) {

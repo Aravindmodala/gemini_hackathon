@@ -1,76 +1,104 @@
-/**
- * Unit tests for the App root component.
- *
- * Validates that all critical UI elements render correctly
- * in the default (disconnected) state.
- */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import App from '../App';
+import { render, screen, fireEvent } from "@testing-library/react";
+import App from "../App";
 
-// Mock useStoryteller so we don't trigger real WebSocket/audio logic
-vi.mock('../hooks/useStoryteller', () => ({
+const mockUseAuth = vi.fn();
+const mockGetSessionDetail = vi.fn();
+const mockStopStory = vi.fn();
+let mockStatus = "idle";
+let mockSections: unknown[] = [];
+let mockSessions: Array<Record<string, unknown>> = [];
+
+vi.mock("../contexts/AuthContext", () => ({
+  useAuth: () => mockUseAuth(),
+}));
+
+vi.mock("../components/Scene", () => ({
+  Scene: () => <div data-testid="scene-3d" />,
+}));
+
+vi.mock("../hooks/useStoryteller", () => ({
   useStoryteller: () => ({
-    status: 'disconnected',
-    logs: [],
+    status: mockStatus,
+    sections: mockSections,
+    currentMusic: null,
     startStory: vi.fn(),
-    stopStory: vi.fn(),
-    sendImage: vi.fn(),
+    stopStory: mockStopStory,
   }),
 }));
 
-describe('App', () => {
+vi.mock("../hooks/useSessions", () => ({
+  useSessions: () => ({
+    sessions: mockSessions,
+    loading: false,
+    error: null,
+    fetchSessions: vi.fn(),
+    getSessionDetail: mockGetSessionDetail,
+    deleteSession: vi.fn(),
+    renameSession: vi.fn(),
+  }),
+}));
+
+function auth(user: Record<string, unknown> | null = null) {
+  mockUseAuth.mockReturnValue({
+    user: user ?? { uid: "u1", email: "test@test.com", displayName: "Test User", photoURL: null },
+    loading: false,
+    signOut: vi.fn(),
+    getIdToken: vi.fn().mockResolvedValue("token"),
+  });
+}
+
+describe("App shell wiring", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
+    mockStatus = "idle";
+    mockSections = [];
+    mockSessions = [];
+    mockGetSessionDetail.mockResolvedValue({ interactions: [] });
+  });
+
+  it("toggles sidebar open and closed", () => {
+    auth();
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /close sidebar/i }));
+    expect(screen.getAllByRole("button", { name: /open sidebar/i }).length).toBeGreaterThan(0);
   });
 
-  // ── Title Badge ───────────────────────────────────────────
-  describe('title badge', () => {
-    it('should render the app title', () => {
-      expect(screen.getByText('The Emotional Chronicler')).toBeInTheDocument();
+  it("session selection triggers hydration path", async () => {
+    auth();
+    mockSessions = [{ session_id: "sess-1", title: "Hydrated Story", status: "active", created_at: null, updated_at: null, interaction_count: 1, preview: "Persisted opening" }];
+    mockGetSessionDetail.mockResolvedValue({
+      session_id: "sess-1",
+      title: "Hydrated Story",
+      status: "active",
+      created_at: null,
+      updated_at: null,
+      interactions: [{ role: "elora", text: "Persisted opening", timestamp: "2026-01-01T00:00:00Z" }],
     });
-
-    it('should render the subtitle', () => {
-      expect(screen.getByText('Immersive AI Storytelling')).toBeInTheDocument();
-    });
-
-    it('should render the gem icon', () => {
-      expect(screen.getByText('✦')).toBeInTheDocument();
-    });
+    render(<App />);
+    fireEvent.click(screen.getByText("Hydrated Story"));
+    expect(mockStopStory).toHaveBeenCalled();
+    expect(mockGetSessionDetail).toHaveBeenCalledWith("sess-1");
+    expect(await screen.findByText("Persisted opening")).toBeInTheDocument();
   });
 
-  // ── Connection Status ─────────────────────────────────────
-  describe('connection status', () => {
-    it('should show "DISCONNECTED" status label', () => {
-      expect(screen.getByText('DISCONNECTED')).toBeInTheDocument();
+  it("new story clears hydrated state", async () => {
+    auth();
+    mockSessions = [{ session_id: "sess-1", title: "Hydrated Story", status: "active", created_at: null, updated_at: null, interaction_count: 1, preview: "Persisted opening" }];
+    mockGetSessionDetail.mockResolvedValue({
+      session_id: "sess-1",
+      title: "Hydrated Story",
+      status: "active",
+      created_at: null,
+      updated_at: null,
+      interactions: [{ role: "elora", text: "Persisted opening", timestamp: "2026-01-01T00:00:00Z" }],
     });
-  });
-
-  // ── Emotion Controls ──────────────────────────────────────
-  describe('emotion controls', () => {
-    it('should render all 4 emotion buttons', () => {
-      expect(screen.getByText('😐')).toBeInTheDocument();
-      expect(screen.getByText('😊')).toBeInTheDocument();
-      expect(screen.getByText('😢')).toBeInTheDocument();
-      expect(screen.getByText('😲')).toBeInTheDocument();
-    });
-
-    it('should have "neutral" button active by default', () => {
-      const neutralBtn = screen.getByText('😐').closest('button');
-      expect(neutralBtn?.className).toContain('emo-btn--active');
-    });
-
-    it('should switch active class when another emotion is clicked', () => {
-      const happyBtn = screen.getByText('😊').closest('button')!;
-      fireEvent.click(happyBtn);
-      expect(happyBtn.className).toContain('emo-btn--active');
-    });
-  });
-
-  // ── Talk Button (via AvatarHUD) ───────────────────────────
-  describe('talk button', () => {
-    it('should render the "Talk to Elora" button', () => {
-      expect(screen.getByRole('button', { name: /talk to elora/i })).toBeInTheDocument();
-    });
+    render(<App />);
+    fireEvent.click(screen.getByText("Hydrated Story"));
+    expect(await screen.findByText("Persisted opening")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("New Story"));
+    expect(screen.queryByText("Persisted opening", { selector: "p" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /begin the story/i })).toBeInTheDocument();
   });
 });
+

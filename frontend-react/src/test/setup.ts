@@ -4,9 +4,17 @@
  * Mocks browser APIs that don't exist in jsdom:
  *   - WebSocket, AudioContext, MediaDevices, requestAnimationFrame
  *   - HTMLCanvasElement.getContext (needed by Three.js / R3F)
+ *
+ * NOTE: Firebase mocks are handled per-test-file via vi.mock() calls,
+ * not in this global setup, because vi.mock() in setup files has
+ * module resolution issues in Vitest 4.x.
  */
-import '@testing-library/jest-dom/vitest';
-import { vi } from 'vitest';
+// In Vitest 4.x, vi/describe/it/expect are globals (globals: true in config)
+// Do NOT import from 'vitest' — it causes "No test suite found" errors.
+
+// Extend Vitest's expect with jest-dom matchers
+import * as matchers from '@testing-library/jest-dom/matchers';
+expect.extend(matchers);
 
 // ── WebSocket Mock ──────────────────────────────────────────
 class MockWebSocket {

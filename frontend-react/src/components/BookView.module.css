@@ -1,0 +1,680 @@
+/* ================================================================
+   BOOK VIEW — Realistic 3D CSS Book
+   A dark-themed leather-bound book floating in the story world
+   ================================================================ */
+
+/* ── Root wrapper ───────────────────────────────────────────── */
+.bookView {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  padding: 16px;
+  background: linear-gradient(135deg, #050510 0%, #1a0a3a 50%, #050510 100%);
+  overflow: hidden;
+}
+
+/* Ambient purple glow behind the book */
+.bookView::before {
+  content: '';
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 70vw;
+  height: 55vh;
+  background: radial-gradient(ellipse, rgba(124, 58, 237, 0.14) 0%, transparent 68%);
+  filter: blur(50px);
+  pointer-events: none;
+}
+
+/* ── Top controls bar ───────────────────────────────────────── */
+.topBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  z-index: 10;
+  width: min(90vw, 1080px);
+  flex-shrink: 0;
+}
+
+/* ── Generating indicator ───────────────────────────────────── */
+.generatingBadge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(5, 5, 20, 0.78);
+  border: 1px solid rgba(124, 58, 237, 0.28);
+  border-radius: 100px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.generatingDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #7c3aed;
+  animation: dotBounce 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.generatingDot:nth-child(2) { animation-delay: 0.2s; }
+.generatingDot:nth-child(3) { animation-delay: 0.4s; }
+
+.generatingText {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  color: #a78bfa;
+  letter-spacing: 0.05em;
+}
+
+@keyframes dotBounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+/* ── 3D perspective scene ───────────────────────────────────── */
+.bookScene {
+  perspective: 1800px;
+  perspective-origin: 50% 40%;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 0;
+}
+
+/* Slight desk-lean tilt toward viewer + layered shadow */
+.bookTilt {
+  transform: rotateX(6deg);
+  transform-style: preserve-3d;
+  filter:
+    drop-shadow(0 40px 70px rgba(0, 0, 0, 0.75))
+    drop-shadow(0 0 50px rgba(124, 58, 237, 0.18));
+  transition: filter 700ms ease;
+}
+
+.bookTiltFlipping {
+  filter:
+    drop-shadow(0 60px 100px rgba(0, 0, 0, 0.9))
+    drop-shadow(0 0 70px rgba(124, 58, 237, 0.28));
+}
+
+/* ── Book outer shell ───────────────────────────────────────── */
+.book {
+  display: flex;
+  width: min(88vw, 1060px);
+  height: min(76vh, 640px);
+  transform-style: preserve-3d;
+  position: relative;
+}
+
+/* ── Left Cover ─────────────────────────────────────────────── */
+.coverLeft {
+  width: 42px;
+  flex-shrink: 0;
+  height: 100%;
+  background: linear-gradient(160deg, #20093f 0%, #0f0522 25%, #1a0a3a 50%, #0a0318 75%, #1a0a3a 100%);
+  border-radius: 5px 0 0 5px;
+  position: relative;
+  box-shadow: -6px 0 18px rgba(0, 0, 0, 0.7), inset 3px 0 6px rgba(167, 139, 250, 0.08);
+}
+
+/* Inset gold frame on left cover */
+.coverLeft::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 7px;
+  right: 7px;
+  border: 1px solid rgba(200, 169, 110, 0.22);
+  border-radius: 3px;
+}
+
+/* Subtle diagonal grain texture */
+.coverLeft::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.012) 2px,
+    rgba(255, 255, 255, 0.012) 4px
+  );
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* ── Spine ──────────────────────────────────────────────────── */
+.spine {
+  width: 24px;
+  flex-shrink: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #06030f 0%, #100826 40%, #1a0a3a 55%, #080315 100%);
+  position: relative;
+  z-index: 5;
+  box-shadow:
+    -3px 0 14px rgba(0, 0, 0, 0.9),
+    3px 0 14px rgba(0, 0, 0, 0.9),
+    inset 0 0 10px rgba(124, 58, 237, 0.18);
+}
+
+/* Purple glow thread down spine center */
+.spine::after {
+  content: '';
+  position: absolute;
+  top: 15%;
+  bottom: 15%;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg,
+    transparent 0%,
+    rgba(124, 58, 237, 0.55) 30%,
+    rgba(167, 139, 250, 0.7) 50%,
+    rgba(124, 58, 237, 0.55) 70%,
+    transparent 100%
+  );
+}
+
+/* ── Pages region ───────────────────────────────────────────── */
+.pagesRegion {
+  flex: 1;
+  display: flex;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── Left page (previous content) ──────────────────────────── */
+.pageLeft {
+  flex: 1;
+  height: 100%;
+  background: linear-gradient(160deg, #ede0c2 0%, #f0e8d0 15%, #f5efe0 80%, #ecddc4 100%);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Paper grain on left page */
+.pageLeft::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Fold shadow — right edge of left page */
+.pageLeft::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 55px;
+  height: 100%;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.14) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ── Right page flip container ──────────────────────────────── */
+.pageRightContainer {
+  flex: 1;
+  height: 100%;
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  position: relative;
+  will-change: transform;
+  min-width: 0;
+}
+
+/* ── Right page front face ──────────────────────────────────── */
+.pageFront {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, #f7f1e3 0%, #f5efe0 50%, #ede0c8 100%);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* Paper grain on front face */
+.pageFront::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Fold shadow — left edge of right front page */
+.pageFront::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 55px;
+  height: 100%;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.14) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ── Right page back face (next page) ───────────────────────── */
+.pageBack {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, #ede0c8 0%, #f0e8d0 50%, #f5efe0 100%);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: rotateY(180deg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* Paper grain on back face */
+.pageBack::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.045'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Fold shadow — right edge of back face */
+.pageBack::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 55px;
+  height: 100%;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.14) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ── Page inner scroll area ─────────────────────────────────── */
+.pageInner {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 26px 8px;
+  position: relative;
+  z-index: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+.pageInner::-webkit-scrollbar { width: 4px; }
+.pageInner::-webkit-scrollbar-track { background: transparent; }
+.pageInner::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 2px;
+}
+
+/* Prose text on pages */
+.prose {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  font-size: 14.5px;
+  line-height: 1.88;
+  color: #1a0a0a;
+  margin: 0 0 14px 0;
+  text-align: justify;
+  text-indent: 1.5em;
+  letter-spacing: 0.2px;
+  position: relative;
+  z-index: 1;
+}
+
+.prose:first-child { text-indent: 0; }
+
+/* Figures and images inside page */
+.pageFigure {
+  margin: 16px 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  position: relative;
+  z-index: 1;
+}
+
+.pageImage {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+}
+
+.pageCaption {
+  padding: 8px 10px;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  color: #7a6a5a;
+  font-style: italic;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* Music badge inside page */
+.musicBadge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 12px 0;
+  background: rgba(124, 58, 237, 0.06);
+  border: 1px solid rgba(124, 58, 237, 0.18);
+  border-radius: 6px;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+
+.musicLabel {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  color: #7a6a8a;
+  flex: 1;
+  min-width: 0;
+}
+
+.audioControl {
+  height: 24px;
+  flex: 0 0 auto;
+  max-width: 180px;
+}
+
+/* ── Page footer (page number) ──────────────────────────────── */
+.pageFooter {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 24px 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.pageNumber {
+  font-family: 'Georgia', serif;
+  font-size: 12px;
+  color: #a89880;
+  letter-spacing: 0.08em;
+}
+
+/* ── Empty page placeholder ─────────────────────────────────── */
+.emptyPage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+
+.emptyPage span {
+  font-family: 'Georgia', serif;
+  font-size: 14px;
+  color: #c0a888;
+  font-style: italic;
+}
+
+/* ── Page edge stack (right side) ───────────────────────────── */
+.pageEdges {
+  width: 16px;
+  flex-shrink: 0;
+  height: 100%;
+  background: repeating-linear-gradient(
+    to bottom,
+    #f5efe0 0px,
+    #ddd0b0 0.5px,
+    #f0e8d0 1px,
+    #e8d8b8 1.5px,
+    #f5efe0 2px
+  );
+  border-radius: 0 3px 3px 0;
+  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.45);
+  position: relative;
+}
+
+.pageEdges::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.08), transparent);
+}
+
+.pageEdges::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.08), transparent);
+}
+
+/* ── Right Cover ────────────────────────────────────────────── */
+.coverRight {
+  width: 42px;
+  flex-shrink: 0;
+  height: 100%;
+  background: linear-gradient(160deg, #1a0a3a 0%, #0f0522 35%, #1a0a3a 65%, #0a0318 100%);
+  border-radius: 0 5px 5px 0;
+  position: relative;
+  box-shadow: 6px 0 18px rgba(0, 0, 0, 0.7), inset -3px 0 6px rgba(167, 139, 250, 0.07);
+}
+
+.coverRight::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 7px;
+  right: 7px;
+  border: 1px solid rgba(200, 169, 110, 0.18);
+  border-radius: 3px;
+}
+
+/* ── Bottom controls ────────────────────────────────────────── */
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0 2px;
+  gap: 16px;
+  width: min(88vw, 1060px);
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.controlsGroup {
+  display: flex;
+  gap: 8px;
+  min-width: 60px;
+}
+
+.controlsCenter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.closeBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  background: rgba(5, 5, 20, 0.65);
+  color: #94a3b8;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.closeBtn:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+  transform: scale(1.05);
+}
+
+.navBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: rgba(124, 58, 237, 0.1);
+  border: 1px solid rgba(124, 58, 237, 0.28);
+  border-radius: 8px;
+  color: #a78bfa;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.navBtn:hover:not(:disabled) {
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(124, 58, 237, 0.55);
+  transform: translateY(-1px);
+  box-shadow: 0 0 18px rgba(124, 58, 237, 0.25);
+}
+
+.navBtn:active:not(:disabled) { transform: translateY(0); }
+
+.navBtn:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+
+.pageCounter {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.pageCounterText {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  color: #64748b;
+  letter-spacing: 0.04em;
+}
+
+.pageCounterText strong { color: #c4b5fd; font-weight: 600; }
+
+.progressBar {
+  width: 100%;
+  max-width: 280px;
+  height: 2px;
+  background: rgba(124, 58, 237, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, #7c3aed 0%, #a78bfa 100%);
+  border-radius: 2px;
+  transition: width 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Voice button ───────────────────────────────────────────── */
+.voiceBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  background: rgba(5, 5, 20, 0.7);
+  border: 1px solid rgba(124, 58, 237, 0.35);
+  border-radius: 10px;
+  color: #a78bfa;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 200ms ease;
+  position: relative;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.voiceBtn:hover {
+  background: rgba(124, 58, 237, 0.15);
+  border-color: rgba(124, 58, 237, 0.6);
+  box-shadow: 0 0 20px rgba(124, 58, 237, 0.25);
+  transform: translateY(-1px);
+}
+
+.voiceBtnActive {
+  background: rgba(124, 58, 237, 0.18);
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow: 0 0 24px rgba(124, 58, 237, 0.3);
+  color: #c4b5fd;
+}
+
+.voicePulse {
+  position: absolute;
+  inset: -5px;
+  border-radius: 14px;
+  border: 1.5px solid rgba(124, 58, 237, 0.4);
+  animation: pulseRing 1.6s ease-out infinite;
+}
+
+@keyframes pulseRing {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+
+/* ── Responsive ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .book { height: min(68vh, 480px); }
+  .coverLeft, .coverRight { width: 24px; }
+  .spine { width: 16px; }
+  .pageLeft { display: none; }
+  .pageRightContainer { flex: 1; }
+  .pageEdges { width: 8px; }
+  .pageInner { padding: 20px 18px 8px; }
+  .prose { font-size: 13.5px; }
+  .navBtn { padding: 7px 12px; font-size: 12px; }
+}

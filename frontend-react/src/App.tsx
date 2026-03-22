@@ -1,59 +1,198 @@
-// import { useRef } from 'react';
-// import { Scene } from './components/Scene';
+import { useCallback, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { AvatarHUD } from './components/AvatarHUD';
+import { StoryPrompt } from './components/StoryPrompt';
+import { BookView } from './components/BookView';
+import { AuthScreen } from './components/AuthScreen';
+import { SessionSidebar } from './components/SessionSidebar';
+import { EmptyState } from './components/EmptyState';
+import { useAuth } from './contexts/AuthContext';
 import { useStoryteller } from './hooks/useStoryteller';
-import { useAvatarStore } from './store/useAvatarStore';
+import { useSessions } from './hooks/useSessions';
+import type { StorySection } from './hooks/useStoryteller';
+import type { Interaction } from './types/session';
 import './App.css';
 
+/* ── Loading spinner shown while Firebase resolves auth state ── */
+function LoadingScreen() {
+  return (
+    <div style={loadingStyles.backdrop}>
+      <div style={loadingStyles.spinner} />
+      <p style={loadingStyles.text}>Awakening the Chronicler…</p>
+      <style>{`@keyframes authSpinner { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+const loadingStyles: Record<string, CSSProperties> = {
+  backdrop: {
+    position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center', gap: 20,
+    background: 'radial-gradient(ellipse at 60% 80%, #1a0a3a 0%, #05051a 50%, #000008 100%)',
+    zIndex: 100,
+  },
+  spinner: {
+    width: 40, height: 40,
+    border: '3px solid rgba(124,58,237,0.2)', borderTopColor: '#7c3aed',
+    borderRadius: '50%', animation: 'authSpinner 0.8s linear infinite',
+  },
+  text: { fontFamily: "'Cinzel', serif", fontSize: 14, color: '#94a3b8', letterSpacing: '0.12em' },
+};
+
+/* ══════════════════════════════════════════════════════
+   App — gated on authentication
+   ══════════════════════════════════════════════════════ */
+
 function App() {
-  const { status, startStory, stopStory } = useStoryteller();
-  const setEmotion = useAvatarStore((s) => s.setEmotion);
-  const currentEmotion = useAvatarStore((s) => s.currentEmotion);
+  const { user, loading, signOut, getIdToken } = useAuth();
+
+  const { sessions, loading: sessionsLoading, fetchSessions, getSessionDetail, deleteSession, renameSession } = useSessions();
+
+  const { status, sections, currentMusic, startStory, stopStory } = useStoryteller({ getIdToken });
+
+  const [isSidebarOpen, setSidebarOpen] = useState(true);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [hydratedSections, setHydratedSections] = useState<StorySection[]>([]);
+
+  const handleNewStory = useCallback(() => {
+    stopStory();
+    setActiveSessionId(null);
+    setHydratedSections([]);
+  }, [stopStory]);
+
+  const handleBeginStory = (prompt: string) => {
+    setActiveSessionId(null);
+    setHydratedSections([]);
+    void startStory(prompt);
+    void fetchSessions();
+  };
+
+  const handleSelectSession = useCallback(async (sessionId: string) => {
+    stopStory();
+    setActiveSessionId(sessionId);
+
+    try {
+      const detail = await getSessionDetail(sessionId);
+      const nextSections: StorySection[] = [];
+
+      for (const interaction of detail.interactions as Interaction[]) {
+        if (interaction.text && interaction.text.trim()) {
+          nextSections.push({ type: 'text', content: interaction.text });
+        }
+
+        if (interaction.role !== 'tool') continue;
+
+        const args = interaction.args ?? {};
+        const imageUrl = typeof args.url === 'string'
+          ? args.url
+          : typeof (args as Record<string, unknown>).image_url === 'string'
+            ? (args as { image_url: string }).image_url
+            : null;
+        const musicUrl = typeof (args as Record<string, unknown>).audio_url === 'string'
+          ? (args as { audio_url: string }).audio_url
+          : (interaction.name?.toLowerCase().includes('music') && typeof args.url === 'string' ? args.url : null);
+
+        if (imageUrl) {
+          nextSections.push({
+            type: 'image',
+            url: imageUrl,
+            caption: typeof (args as Record<string, unknown>).caption === 'string'
+              ? (args as { caption: string }).caption
+              : '',
+          });
+        }
+
+        if (musicUrl) {
+          nextSections.push({
+            type: 'music',
+            url: musicUrl,
+            duration: typeof (args as Record<string, unknown>).duration === 'number'
+              ? (args as { duration: number }).duration
+              : 33,
+          });
+        }
+      }
+
+      setHydratedSections(nextSections);
+    } catch {
+      setHydratedSections([]);
+    }
+  }, [getSessionDetail, stopStory]);
+
+  const handleSignOut = () => {
+    stopStory();
+    void signOut();
+  };
+
+  const storySections = activeSessionId ? hydratedSections : sections;
+  const showStory = storySections.length > 0;
+  const showPrompt = (status === 'idle' || status === 'error') && !showStory;
+
+  /* ── Auth gates ─────────────────────────────────────────── */
+  if (loading) return <LoadingScreen />;
+  if (!user)   return <AuthScreen />;
+
+  const SIDEBAR_WIDTH = 300;
 
   return (
-    <div className="app-root">
-      {/* Full-screen 3D canvas (Temporarily disabled for testing) */}
-      {/* <Scene /> */}
+    <div style={{ display: 'flex', minHeight: '100vh', position: 'relative' }}>
 
-      {/* Top-left title badge */}
-      <header className="app-header">
-        <div className="title-badge">
-          <span className="title-badge__gem">✦</span>
-          <div>
-            <h1 className="app-title">The Emotional Chronicler</h1>
-            <p className="app-subtitle">Immersive AI Storytelling</p>
-          </div>
-        </div>
-      </header>
-
-      {/* Connection status dot — top right */}
-      <div className={`conn-dot conn-dot--${status}`}>
-        <span className="conn-dot__orb" />
-        <span className="conn-dot__label">{status.toUpperCase()}</span>
-      </div>
-
-      {/* Floating Talk button over avatar */}
-      <AvatarHUD
-        status={status}
-        onStart={startStory}
-        onStop={stopStory}
+      {/* Session Sidebar */}
+      <SessionSidebar
+        sessions={sessions}
+        loading={sessionsLoading}
+        activeSessionId={activeSessionId}
+        onNewStory={handleNewStory}
+        onSelectSession={(sessionId) => { void handleSelectSession(sessionId); }}
+        onDeleteSession={deleteSession}
+        onRenameSession={renameSession}
+        onSignOut={handleSignOut}
+        userName={user.displayName}
+        userEmail={user.email}
+        userPhoto={user.photoURL}
+        isOpen={isSidebarOpen}
+        onToggle={() => setSidebarOpen((prev) => !prev)}
       />
 
-      {/* Dev emotion controls — bottom left corner, subtle */}
-      <div className="dev-emotions">
-        {(['neutral', 'happy', 'sad', 'surprised'] as const).map((e) => (
-          <button
-            key={e}
-            className={`emo-btn ${currentEmotion === e ? 'emo-btn--active' : ''}`}
-            onClick={() => setEmotion(e)}
-          >
-            {e === 'neutral'   && '😐'}
-            {e === 'happy'     && '😊'}
-            {e === 'sad'       && '😢'}
-            {e === 'surprised' && '😲'}
-          </button>
-        ))}
+      {/* Main content */}
+      <div
+        className="app-root"
+        style={{ flex: 1, marginLeft: isSidebarOpen ? SIDEBAR_WIDTH : 0, position: 'relative', minHeight: '100vh' }}
+      >
+        {/* Top-left title badge */}
+        <header className="app-header" style={{ left: 16 }}>
+          <div className="title-badge">
+            <span className="title-badge__gem">✦</span>
+            <div>
+              <h1 className="app-title">The Emotional Chronicler</h1>
+              <p className="app-subtitle">Illustrated AI Storytelling</p>
+            </div>
+          </div>
+        </header>
+
+        {/* Empty state — shown when app loads and no story exists */}
+        {!showStory && status === 'idle' && (
+          <EmptyState />
+        )}
+
+        {/* 3D Book view — shown once content starts arriving */}
+        {showStory && (
+          <BookView sections={storySections} status={status} onClose={handleNewStory} />
+        )}
+
+        {/* Prompt input — shown when idle */}
+        {showPrompt && (
+          <StoryPrompt onSubmit={handleBeginStory} disabled={status !== 'idle'} />
+        )}
+
+        {/* Status badge + stop/new-story controls */}
+        <AvatarHUD status={status} onStop={stopStory} onNewStory={handleNewStory} />
       </div>
+
+      <style>{`
+        @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+        @keyframes pulse-orb { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+      `}</style>
     </div>
   );
 }

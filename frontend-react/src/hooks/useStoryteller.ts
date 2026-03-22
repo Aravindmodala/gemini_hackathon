@@ -1,296 +1,193 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useAvatarStore } from '../store/useAvatarStore';
 
-const PLAYBACK_SAMPLE_RATE = 24000;
-const CAPTURE_SAMPLE_RATE = 16000;
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-export function useStoryteller() {
-  const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'listening' | 'speaking' | 'error'>('disconnected');
-  const [logs, setLogs] = useState<string[]>([]);
-  
-  const wsRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  
-  const playbackContextRef = useRef<AudioContext | null>(null);
-  const nextPlayTimeRef = useRef<number>(0);
+export type StoryStatus = 'idle' | 'generating' | 'done' | 'error';
 
-  // Audio Analyzer for visualizing / lip-syncing playback
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animationFrameRef = useRef<number>(0);
+export type StorySection =
+  | { type: 'text'; content: string }
+  | { type: 'image'; url: string; caption: string }
+  | { type: 'music'; url: string; duration: number };
 
-  const addLog = useCallback((msg: string) => {
-    setLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString()}] ${msg}`]);
+export interface StorytellerOptions {
+  getIdToken?: () => Promise<string>;
+}
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+export function useStoryteller(options?: StorytellerOptions) {
+  const [status, setStatus] = useState<StoryStatus>('idle');
+  const [sections, setSections] = useState<StorySection[]>([]);
+  const [currentMusic, setCurrentMusic] = useState<string | null>(null);
+
+  const abortRef = useRef<AbortController | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // ── Music playback ──────────────────────────────────────────────────────────
+
+  const playMusic = useCallback((url: string) => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    const audio = new Audio(url);
+    audio.volume = 0.35;
+    audio.play().catch(() => {/* autoplay blocked — user can interact to trigger */});
+    audioRef.current = audio;
+    setCurrentMusic(url);
+    audio.onended = () => setCurrentMusic(null);
   }, []);
 
-  const cleanup = useCallback(() => {
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(t => t.stop());
-      mediaStreamRef.current = null;
-    }
-    if (scriptProcessorRef.current) {
-      scriptProcessorRef.current.disconnect();
-      scriptProcessorRef.current = null;
-    }
-    if (sourceNodeRef.current) {
-      sourceNodeRef.current.disconnect();
-      sourceNodeRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(console.error);
-      audioContextRef.current = null;
-    }
-    if (playbackContextRef.current) {
-      playbackContextRef.current.close().catch(console.error);
-      playbackContextRef.current = null;
-    }
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-    
-    wsRef.current = null;
-    nextPlayTimeRef.current = 0;
-    setStatus('disconnected');
-    useAvatarStore.getState().setAction('Idle');
-    useAvatarStore.getState().setLipSyncVolume(0);
+  // ── Append a text chunk to the last text section (or create one) ────────────
+
+  const appendText = useCallback((chunk: string) => {
+    setSections(prev => {
+      const last = prev[prev.length - 1];
+      if (last?.type === 'text') {
+        return [...prev.slice(0, -1), { type: 'text', content: last.content + chunk }];
+      }
+      return [...prev, { type: 'text', content: chunk }];
+    });
   }, []);
 
-  const stopStory = useCallback(() => {
-    addLog('Stopping story...');
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.close();
-    }
-    cleanup();
-  }, [addLog, cleanup]);
+  // ── Start story ─────────────────────────────────────────────────────────────
 
-  const startStory = useCallback(async () => {
+  const startStory = useCallback(async (prompt: string) => {
+    // Abort any in-flight request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // Stop any playing music
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setCurrentMusic(null);
+    }
+
+    setSections([]);
+    setStatus('generating');
+
     try {
-      setStatus('connecting');
-      addLog('Requesting microphone access...');
+      let token: string | undefined;
+      if (options?.getIdToken) {
+        token = await options.getIdToken();
+      }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: { ideal: CAPTURE_SAMPLE_RATE },
-          echoCancellation: true,
-          noiseSuppression: true,
+      const res = await fetch(`${API_BASE}/api/v1/stories`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
+        body: JSON.stringify({ prompt }),
+        signal: controller.signal,
       });
-      mediaStreamRef.current = stream;
-      addLog('Microphone access granted');
 
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      audioContextRef.current = audioCtx;
-      const inputSampleRate = audioCtx.sampleRate;
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      if (!res.body) throw new Error('No response body');
 
-      const sourceNode = audioCtx.createMediaStreamSource(stream);
-      sourceNodeRef.current = sourceNode;
+      // ── Read SSE stream ────────────────────────────────────────────────────
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      const scriptProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
-      scriptProcessorRef.current = scriptProcessor;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      scriptProcessor.onaudioprocess = (event) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
 
-        const inputData = event.inputBuffer.getChannelData(0);
-        let downsampled = inputData;
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (!raw) continue;
 
-        // Downsample if native rate is different
-        if (inputSampleRate !== CAPTURE_SAMPLE_RATE) {
-          const ratio = inputSampleRate / CAPTURE_SAMPLE_RATE;
-          const newLength = Math.round(inputData.length / ratio);
-          downsampled = new Float32Array(newLength);
-          for (let i = 0; i < newLength; i++) {
-            const srcIndex = i * ratio;
-            const low = Math.floor(srcIndex);
-            const high = Math.min(low + 1, inputData.length - 1);
-            const frac = srcIndex - low;
-            downsampled[i] = inputData[low] * (1 - frac) + inputData[high] * frac;
+          let event: Record<string, unknown>;
+          try {
+            event = JSON.parse(raw);
+          } catch {
+            continue;
+          }
+
+          switch (event.type) {
+            case 'text':
+              appendText(event.chunk as string);
+              break;
+
+            case 'image':
+              setSections(prev => [
+                ...prev,
+                { type: 'image', url: event.url as string, caption: (event.caption as string) ?? '' },
+              ]);
+              break;
+
+            case 'music': {
+              const url = event.url as string;
+              setSections(prev => [
+                ...prev,
+                { type: 'music', url, duration: (event.duration as number) ?? 33 },
+              ]);
+              playMusic(url);
+              break;
+            }
+
+            case 'done':
+              setStatus('done');
+              break;
+
+            case 'error':
+              console.error('[Story] Server error:', event.message);
+              setStatus('error');
+              break;
           }
         }
+      }
 
-        // Float32 to Int16 PCM
-        const pcm16 = new Int16Array(downsampled.length);
-        for (let i = 0; i < downsampled.length; i++) {
-          const s = Math.max(-1, Math.min(1, downsampled[i]));
-          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        }
+      // Stream ended without explicit done (normal on abort)
+      if (status === 'generating') setStatus('done');
 
-        // ArrayBuffer to Base64
-        const bytes = new Uint8Array(pcm16.buffer);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const base64Audio = btoa(binary);
-
-        wsRef.current.send(JSON.stringify({ type: 'audio', data: base64Audio }));
-      };
-
-      sourceNode.connect(scriptProcessor);
-      scriptProcessor.connect(audioCtx.destination);
-
-      // WebSocket connection
-      // Backend FastAPI server runs on port 3001
-      const wsUrl = `ws://localhost:3001/ws`;
-      addLog(`Connecting WebSocket to ${wsUrl}`);
-      
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      const playbackCtx = new (window.AudioContext || (window as any).webkitAudioContext)({
-        sampleRate: PLAYBACK_SAMPLE_RATE,
-      });
-      playbackContextRef.current = playbackCtx;
-      nextPlayTimeRef.current = 0;
-
-      // Setup Analytics for Lip-Sync
-      const analyser = playbackCtx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.connect(playbackCtx.destination);
-      analyserRef.current = analyser;
-
-      const analyzeAudio = () => {
-        if (!analyserRef.current) return;
-        
-        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-        analyserRef.current.getByteFrequencyData(dataArray);
-        
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const average = sum / dataArray.length;
-        
-        // Normalize volume (0 to 1 roughly)
-        const volume = Math.min(1, average / 128);
-        useAvatarStore.getState().setLipSyncVolume(volume);
-
-        animationFrameRef.current = requestAnimationFrame(analyzeAudio);
-      };
-      analyzeAudio();
-
-      ws.onopen = () => {
-        addLog('WebSocket connected to server');
-      };
-
-      ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-
-        switch (msg.type) {
-          case 'status':
-            if (msg.status === 'connected') {
-              setStatus('connected');
-              addLog('Server connected to Gemini');
-            } else if (msg.status === 'ready') {
-              setStatus('listening');
-              useAvatarStore.getState().setAction('Idle');
-              addLog('Gemini session ready — speak now!');
-            } else if (msg.status === 'turn_complete') {
-              setStatus('listening');
-              useAvatarStore.getState().setAction('Idle');
-              addLog('Chronicler finished speaking');
-            }
-            break;
-
-          case 'audio':
-            setStatus('speaking');
-            useAvatarStore.getState().setAction('Talking');
-            
-            // Base64 to ArrayBuffer
-            const binaryStr = atob(msg.data);
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) {
-              bytes[i] = binaryStr.charCodeAt(i);
-            }
-            const int16 = new Int16Array(bytes.buffer);
-
-            // Int16 to Float32
-            const float32 = new Float32Array(int16.length);
-            for (let i = 0; i < int16.length; i++) {
-              float32[i] = int16[i] / 32768;
-            }
-
-            const audioBuffer = playbackCtx.createBuffer(1, float32.length, PLAYBACK_SAMPLE_RATE);
-            audioBuffer.getChannelData(0).set(float32);
-
-            const source = playbackCtx.createBufferSource();
-            source.buffer = audioBuffer;
-            // Connect to analyser instead of destination directly
-            source.connect(analyser);
-
-            const now = playbackCtx.currentTime;
-            const startTime = Math.max(now, nextPlayTimeRef.current);
-            source.start(startTime);
-
-            nextPlayTimeRef.current = startTime + audioBuffer.duration;
-            break;
-
-          case 'tool_event':
-            addLog(`Tool called: ${msg.name}`);
-            break;
-
-          case 'error':
-            addLog(`Error: ${msg.message}`);
-            setStatus('error');
-            break;
-        }
-      };
-
-      ws.onerror = () => {
-        addLog('WebSocket error');
+    } catch (err: unknown) {
+      if ((err as Error).name === 'AbortError') {
+        // User stopped — not an error
+        setStatus('idle');
+      } else {
+        console.error('[Story] Fetch error:', err);
         setStatus('error');
-      };
-
-      ws.onclose = () => {
-        addLog('WebSocket closed');
-        cleanup();
-      };
-    } catch (err: any) {
-      addLog(`Error: ${err.message}`);
-      setStatus('error');
-      cleanup();
+      }
     }
-  }, [addLog, cleanup]);
+  }, [options?.getIdToken, appendText, playMusic]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Clean up on unmount
+  // ── Stop story ──────────────────────────────────────────────────────────────
+
+  const stopStory = useCallback(() => {
+    abortRef.current?.abort();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setCurrentMusic(null);
+    setStatus('idle');
+  }, []);
+
+  // ── Cleanup on unmount ──────────────────────────────────────────────────────
+
   useEffect(() => {
-    return () => cleanup();
-  }, [cleanup]);
-
-  const sendImage = useCallback((file: File) => {
-    if (!file) return;
-    addLog(`Uploading ${file.name}...`);
-    
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      const match = dataUrl.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
-      
-      if (!match) {
-        addLog('Failed to parse image data format');
-        return;
-      }
-
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ 
-          type: 'image', 
-          mimeType: match[1],
-          data: match[2] 
-        }));
-        addLog(`📸 Sent image`);
-      }
+    return () => {
+      abortRef.current?.abort();
+      audioRef.current?.pause();
     };
-    reader.readAsDataURL(file);
-  }, [addLog]);
+  }, []);
 
   return {
     status,
-    logs,
+    sections,
+    currentMusic,
     startStory,
     stopStory,
-    sendImage
   };
 }

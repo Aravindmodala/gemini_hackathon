@@ -29,6 +29,25 @@ def _get_db() -> firestore.Client | None:
     return _db
 
 
+def _safe_iso(val) -> str | None:
+    """Safely convert a Firestore timestamp to ISO 8601 string."""
+    if val is None:
+        return None
+    try:
+        return val.isoformat()
+    except AttributeError:
+        return str(val)
+
+
+def _get_preview(interactions: list) -> str:
+    """Get a short preview from the last meaningful interaction."""
+    for entry in reversed(interactions):
+        text = entry.get("text", "")
+        if text and entry.get("role") in ("user", "elora"):
+            return text[:100] + ("..." if len(text) > 100 else "")
+    return "New conversation"
+
+
 class SessionStore:
     """
     Manages a single conversation's lifecycle in Firestore.
@@ -53,7 +72,7 @@ class SessionStore:
         """Whether Firestore is available for logging."""
         return self._db is not None
 
-    def create_session(self) -> str:
+    def create_session(self, title: str = "Untitled Story") -> str:
         """Create a new session document in Firestore. Returns session_id."""
         self.session_id = uuid.uuid4().hex[:12]
 
@@ -75,6 +94,7 @@ class SessionStore:
                 "created_at": now,
                 "updated_at": now,
                 "status": "active",
+                "title": title,
                 "interactions": [],
             })
         except Exception as e:
@@ -147,6 +167,96 @@ class SessionStore:
         except Exception as e:
             logger.warning(f"[Store] Failed to end session: {e}")
 
+    def resume_session(self, session_id: str) -> bool:
+        """Attach to an existing session. Returns True if it exists in Firestore.
+
+        Args:
+            session_id: The session ID to resume.
+
+        Returns:
+            True if the session document exists and was attached successfully.
+        """
+        self.session_id = session_id
+        self._init_doc_ref()
+        return self._verify_session_exists()
+
+    def _init_doc_ref(self) -> None:
+        """Initialize the Firestore document reference for an existing session."""
+        if not self._db or not self.session_id:
+            return
+        try:
+            self._doc_ref = (
+                self._db.collection("sessions")
+                .document(self.user_id)
+                .collection("conversations")
+                .document(self.session_id)
+            )
+        except Exception as e:
+            logger.warning(f"[Store] Failed to init doc ref: {e}")
+            self._doc_ref = None
+
+    def _verify_session_exists(self) -> bool:
+        """Check whether the current session document exists in Firestore."""
+        if not self._doc_ref:
+            return False
+        try:
+            doc = self._doc_ref.get()
+            return doc.exists
+        except Exception as e:
+            logger.warning(f"[Store] Failed to verify session: {e}")
+            return False
+
+    def get_session_context(self) -> str | None:
+        """
+        Load interactions from the CURRENT session for resume context.
+
+        Used when a user reconnects to an existing active session.
+        Returns formatted narrative context or None.
+        """
+        if not self._doc_ref:
+            return None
+        try:
+            doc = self._doc_ref.get()
+            if not doc.exists:
+                return None
+            data = doc.to_dict()
+            interactions = data.get("interactions", [])
+            if not interactions:
+                return None
+
+            # Format same as get_previous_context but for current session
+            lines = []
+            for entry in interactions[-30:]:  # Last 30 interactions
+                role = entry.get("role", "")
+                if role == "user":
+                    lines.append(f'The traveler said: "{entry.get("text", "")}"')
+                elif role == "elora":
+                    lines.append(f'You (ELORA) narrated: "{entry.get("text", "")}"')
+                elif role == "tool":
+                    tool_name = entry.get("name", "unknown")
+                    if tool_name == "generate_music":
+                        prompt = entry.get("args", {}).get("prompt", "")
+                        lines.append(f'You scored the scene with music: "{prompt}"')
+
+            if not lines:
+                return None
+
+            context = "\n".join(lines)
+            return (
+                f"\n\n═══════════════════════════════════════════════════════════════\n"
+                f"MEMORY — CONTINUING YOUR STORY WITH THIS TRAVELER\n"
+                f"═══════════════════════════════════════════════════════════════\n\n"
+                f"You are continuing a story with this traveler. Here is what happened "
+                f"so far in this session:\n\n{context}\n\n"
+                f"Continue naturally from where you left off. The traveler has returned "
+                f"to hear more of the story. Welcome them back briefly and pick up "
+                f"the narrative thread.\n"
+                f"═══════════════════════════════════════════════════════════════"
+            )
+        except Exception as e:
+            logger.warning(f"[Store] Failed to load session context: {e}")
+            return None
+
     def get_previous_context(self) -> str | None:
         """
         Load the most recent ENDED session for this user and format
@@ -215,3 +325,130 @@ class SessionStore:
         except Exception as e:
             logger.warning(f"[Store] Failed to load previous context: {e}")
             return None
+
+    # ── Static query methods (for REST API) ───────────────────
+
+    @staticmethod
+    def list_sessions(user_id: str, limit: int = 20, cursor: str | None = None) -> tuple:
+        """List sessions for a user with cursor-based pagination.
+
+        Args:
+            user_id: The Firebase UID of the user.
+            limit: Maximum number of sessions to return (1–100).
+            cursor: Opaque cursor — the session_id of the last item from the previous page.
+
+        Returns:
+            A (sessions, next_cursor) tuple. next_cursor is None when no more pages exist.
+        """
+        db = _get_db()
+        if not db:
+            return [], None
+        try:
+            conversations_ref = (
+                db.collection("sessions")
+                .document(user_id)
+                .collection("conversations")
+            )
+            query = conversations_ref.order_by(
+                "updated_at", direction=firestore.Query.DESCENDING
+            )
+
+            # Apply cursor if provided
+            if cursor:
+                cursor_doc = conversations_ref.document(cursor).get()
+                if cursor_doc.exists:
+                    query = query.start_after(cursor_doc)
+
+            # Fetch limit+1 to detect whether a next page exists
+            docs = list(query.limit(limit + 1).stream())
+
+            has_next = len(docs) > limit
+            page_docs = docs[:limit]
+
+            sessions = []
+            for doc in page_docs:
+                data = doc.to_dict()
+                sessions.append({
+                    "session_id": doc.id,
+                    "title": data.get("title", "Untitled Story"),
+                    "status": data.get("status", "unknown"),
+                    "created_at": _safe_iso(data.get("created_at")),
+                    "updated_at": _safe_iso(data.get("updated_at")),
+                    "interaction_count": len(data.get("interactions", [])),
+                    "preview": _get_preview(data.get("interactions", [])),
+                })
+
+            next_cursor = page_docs[-1].id if has_next and page_docs else None
+            return sessions, next_cursor
+
+        except Exception as e:
+            logger.warning(f"[Store] Failed to list sessions: {e}")
+            return [], None
+
+    @staticmethod
+    def get_session(user_id: str, session_id: str) -> dict | None:
+        """Get a single session with all interactions."""
+        db = _get_db()
+        if not db:
+            return None
+        try:
+            doc_ref = (
+                db.collection("sessions")
+                .document(user_id)
+                .collection("conversations")
+                .document(session_id)
+            )
+            doc = doc_ref.get()
+            if not doc.exists:
+                return None
+            data = doc.to_dict()
+            return {
+                "session_id": doc.id,
+                "title": data.get("title", "Untitled Story"),
+                "status": data.get("status", "unknown"),
+                "created_at": _safe_iso(data.get("created_at")),
+                "updated_at": _safe_iso(data.get("updated_at")),
+                "interactions": data.get("interactions", []),
+            }
+        except Exception as e:
+            logger.warning(f"[Store] Failed to get session: {e}")
+            return None
+
+    @staticmethod
+    def delete_session(user_id: str, session_id: str) -> bool:
+        """Delete a session document."""
+        db = _get_db()
+        if not db:
+            return False
+        try:
+            doc_ref = (
+                db.collection("sessions")
+                .document(user_id)
+                .collection("conversations")
+                .document(session_id)
+            )
+            doc_ref.delete()
+            logger.info(f"[Store] Session deleted: {user_id}/{session_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"[Store] Failed to delete session: {e}")
+            return False
+
+    @staticmethod
+    def update_session_title(user_id: str, session_id: str, title: str) -> bool:
+        """Update a session's title."""
+        db = _get_db()
+        if not db:
+            return False
+        try:
+            doc_ref = (
+                db.collection("sessions")
+                .document(user_id)
+                .collection("conversations")
+                .document(session_id)
+            )
+            doc_ref.update({"title": title, "updated_at": datetime.now(timezone.utc)})
+            return True
+        except Exception as e:
+            logger.warning(f"[Store] Failed to update title: {e}")
+            return False

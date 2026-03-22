@@ -1,185 +1,285 @@
 /**
- * Integration test — App + useStoryteller + Zustand store.
+ * Integration tests — App + useStoryteller + BookView + AvatarHUD.
  *
- * Tests the full component tree interaction without mocking the hook,
- * verifying that UI interactions trigger the correct state changes
- * through the real hook wiring (with browser APIs still mocked).
+ * Tests the full component tree with real hooks but mocked fetch/Audio,
+ * verifying that SSE events flow through and update the UI correctly.
+ *
+ * NOTE: Scene component was intentionally removed from App.tsx in favour of
+ * the 3D CSS Book interface. Tests updated accordingly.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import App from '../App';
-import { useAvatarStore } from '../store/useAvatarStore';
 
-// Helper: flush microtask queue + allow timers to fire
-const flushAsync = () => act(async () => {
-  for (let i = 0; i < 5; i++) {
-    await new Promise(r => setTimeout(r, 0));
-  }
-});
+// ── Mock external dependencies ────────────────────────────────────────────────
 
-// ── Trackable WS mock (must be a real class for Vitest 4.x compat) ──
-interface TrackedWS {
-  url: string;
-  close: ReturnType<typeof vi.fn>;
-  send: ReturnType<typeof vi.fn>;
-  readyState: number;
-  onopen: ((ev: Event) => void) | null;
-  onmessage: ((ev: MessageEvent) => void) | null;
-  onerror: ((ev: Event) => void) | null;
-  onclose: ((ev: CloseEvent) => void) | null;
+vi.mock('../contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: {
+      uid: 'test-uid',
+      email: 'test@test.com',
+      displayName: 'Test User',
+      photoURL: null,
+    },
+    loading: false,
+    signOut: vi.fn(),
+    getIdToken: vi.fn().mockResolvedValue('mock-token'),
+    signInWithGoogle: vi.fn(),
+    signInWithEmail: vi.fn(),
+    signUpWithEmail: vi.fn(),
+  }),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock('../hooks/useSessions', () => ({
+  useSessions: () => ({
+    sessions: [],
+    loading: false,
+    error: null,
+    fetchSessions: vi.fn(),
+    getSessionDetail: vi.fn().mockResolvedValue({ interactions: [] }),
+    deleteSession: vi.fn(),
+    renameSession: vi.fn(),
+  }),
+}));
+
+// ── Mock Audio ────────────────────────────────────────────────────────────────
+
+class MockAudio {
+  src: string;
+  volume = 1;
+  onended: (() => void) | null = null;
+  play = vi.fn().mockResolvedValue(undefined);
+  pause = vi.fn();
+  constructor(src: string) { this.src = src; }
+}
+vi.stubGlobal('Audio', MockAudio);
+
+// ── SSE helpers ───────────────────────────────────────────────────────────────
+
+function sseData(payload: Record<string, unknown>): string {
+  return `data: ${JSON.stringify(payload)}\n\n`;
 }
 
-let wsInstances: TrackedWS[];
+function makeSSEStream(events: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(events.join('')));
+      controller.close();
+    },
+  });
+}
 
-// Keep a reference to the original WebSocket (from setup.ts mock)
-const OriginalMockWS = globalThis.WebSocket;
+function mockFetchSSE(events: string[]) {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    body: makeSSEStream(events),
+  }));
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('App Integration', () => {
   beforeEach(() => {
-    wsInstances = [];
-
-    // Use a proper class so `new WebSocket(url)` works in Vitest 4.x.
-    // vi.fn().mockImplementation() is NOT a valid constructor in Vitest 4.x.
-    class TrackingWebSocket {
-      static readonly CONNECTING = 0;
-      static readonly OPEN = 1;
-      static readonly CLOSING = 2;
-      static readonly CLOSED = 3;
-
-      readonly CONNECTING = 0;
-      readonly OPEN = 1;
-      readonly CLOSING = 2;
-      readonly CLOSED = 3;
-
-      url: string;
-      readyState = 0;
-      onopen: ((ev: Event) => void) | null = null;
-      onmessage: ((ev: MessageEvent) => void) | null = null;
-      onerror: ((ev: Event) => void) | null = null;
-      onclose: ((ev: CloseEvent) => void) | null = null;
-      send = vi.fn();
-      close = vi.fn().mockImplementation(() => {
-        this.readyState = 3;
-        this.onclose?.(new CloseEvent('close'));
-      });
-
-      constructor(url: string) {
-        this.url = url;
-        wsInstances.push(this);
-
-        // Auto-connect after microtask
-        queueMicrotask(() => {
-          this.readyState = 1; // OPEN
-          this.onopen?.(new Event('open'));
-        });
-      }
-    }
-
-    (globalThis as any).WebSocket = TrackingWebSocket;
-
-    // Reset avatar store
-    useAvatarStore.setState({
-      currentAction: 'Idle',
-      currentEmotion: 'neutral',
-      lipSyncVolume: 0,
-    });
+    vi.clearAllMocks();
+    vi.stubGlobal('Audio', MockAudio);
   });
 
   afterEach(() => {
-    // Restore WebSocket to the original setup.ts mock.
-    // Do NOT call vi.restoreAllMocks() — it would also restore the global
-    // getUserMedia / AudioContext mocks from setup.ts, breaking later tests.
-    (globalThis as any).WebSocket = OriginalMockWS;
+    vi.unstubAllGlobals();
+    vi.stubGlobal('Audio', MockAudio);
   });
 
-  // ── Initial Render ────────────────────────────────────────
-  it('should render the app with all expected elements', () => {
+  // ── Initial render ────────────────────────────────────────────────────────
+
+  it('renders title and empty state for authenticated user', () => {
+    mockFetchSSE([]);
     render(<App />);
 
+    // Title badge appears in top-left header
     expect(screen.getByText('The Emotional Chronicler')).toBeInTheDocument();
-    expect(screen.getByText('Immersive AI Storytelling')).toBeInTheDocument();
-    expect(screen.getByText('DISCONNECTED')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /talk to elora/i })).toBeInTheDocument();
+    // Story prompt is visible on idle state
+    expect(screen.getByRole('button', { name: /begin the story/i })).toBeInTheDocument();
   });
 
-  // ── Start Story Flow ──────────────────────────────────────
-  it('should create WebSocket when "Talk to Elora" is clicked', async () => {
+  it('shows the story prompt on initial render', () => {
+    mockFetchSSE([]);
     render(<App />);
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /talk to elora/i }));
-    });
-
-    // Flush the full async chain: getUserMedia → AudioContext → WebSocket
-    await flushAsync();
-
-    expect(wsInstances.length).toBe(1);
-    expect(wsInstances[0].url).toBe('ws://localhost:3001/ws');
+    expect(screen.getByRole('button', { name: /begin the story/i })).toBeInTheDocument();
   });
 
-  // ── Emotion Controls + Store ──────────────────────────────
-  it('should update avatar store when emotion buttons are clicked', async () => {
+  it('sidebar renders user info and controls', () => {
+    mockFetchSSE([]);
     render(<App />);
 
-    expect(useAvatarStore.getState().currentEmotion).toBe('neutral');
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('😊'));
-    });
-    expect(useAvatarStore.getState().currentEmotion).toBe('happy');
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('😢'));
-    });
-    expect(useAvatarStore.getState().currentEmotion).toBe('sad');
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('😲'));
-    });
-    expect(useAvatarStore.getState().currentEmotion).toBe('surprised');
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('😐'));
-    });
-    expect(useAvatarStore.getState().currentEmotion).toBe('neutral');
+    expect(screen.getByText('Test User')).toBeInTheDocument();
+    expect(screen.getByText('New Story')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
   });
 
-  // ── Server Message → UI Update ────────────────────────────
-  it('should update UI when server sends "ready" status', async () => {
+  // ── Story generation flow ─────────────────────────────────────────────────
+
+  it('shows generating status after submitting a prompt', async () => {
+    // Fetch that never resolves — keeps hook in "generating"
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise(() => {})));
     render(<App />);
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /talk to elora/i }));
-    });
-
-    await flushAsync();
-
-    // Simulate server sending "connected" + "ready"
-    await act(async () => {
-      wsInstances[0].onmessage?.(new MessageEvent('message', {
-        data: JSON.stringify({ type: 'status', status: 'connected' }),
-      }));
-    });
+    const textarea = screen.getByPlaceholderText(/describe a story/i);
+    fireEvent.change(textarea, { target: { value: 'A dragon story' } });
 
     await act(async () => {
-      wsInstances[0].onmessage?.(new MessageEvent('message', {
-        data: JSON.stringify({ type: 'status', status: 'ready' }),
-      }));
+      fireEvent.click(screen.getByRole('button', { name: /begin the story/i }));
     });
 
-    expect(screen.getByText('LISTENING')).toBeInTheDocument();
+    // Prompt should hide (disabled / not shown while generating)
+    expect(screen.queryByRole('button', { name: /begin the story/i })).not.toBeInTheDocument();
+    // AvatarHUD Stop button appears
+    expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument();
   });
 
-  // ── WebSocket URL Correctness ─────────────────────────────
-  it('should connect to the correct backend WebSocket endpoint', async () => {
+  it('renders streamed text in BookView', async () => {
+    mockFetchSSE([
+      sseData({ type: 'text', chunk: 'Once upon a time in a magical land' }),
+      sseData({ type: 'done' }),
+    ]);
+
     render(<App />);
 
+    const textarea = screen.getByPlaceholderText(/describe a story/i);
+    fireEvent.change(textarea, { target: { value: 'A story' } });
+
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /talk to elora/i }));
+      fireEvent.click(screen.getByRole('button', { name: /begin the story/i }));
     });
 
-    await flushAsync();
+    // Wait for SSE to complete
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 50));
+    });
 
-    expect(wsInstances[0].url).toMatch(/^ws:\/\/localhost:3001\/ws/);
+    expect(screen.getByText('Once upon a time in a magical land')).toBeInTheDocument();
+  });
+
+  it('shows New Story button after story completes', async () => {
+    mockFetchSSE([
+      sseData({ type: 'text', chunk: 'The end.' }),
+      sseData({ type: 'done' }),
+    ]);
+
+    render(<App />);
+
+    const textarea = screen.getByPlaceholderText(/describe a story/i);
+    fireEvent.change(textarea, { target: { value: 'Quick tale' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /begin the story/i }));
+    });
+
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 50));
+    });
+
+    expect(screen.getByRole('button', { name: /new story/i })).toBeInTheDocument();
+  });
+
+  it('stop button aborts generation and returns to idle', async () => {
+    // Fetch that never resolves
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise(() => {})));
+    render(<App />);
+
+    const textarea = screen.getByPlaceholderText(/describe a story/i);
+    fireEvent.change(textarea, { target: { value: 'A story' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /begin the story/i }));
+    });
+
+    expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /stop/i }));
+    });
+
+    // After stop, back to idle — prompt should show again
+    expect(screen.getByRole('button', { name: /begin the story/i })).toBeInTheDocument();
+  });
+
+  it('renders image section in BookView', async () => {
+    mockFetchSSE([
+      sseData({ type: 'text', chunk: 'The dragon appeared.' }),
+      sseData({ type: 'image', url: '/api/images/dragon.png', caption: 'A fierce dragon' }),
+      sseData({ type: 'done' }),
+    ]);
+
+    render(<App />);
+
+    const textarea = screen.getByPlaceholderText(/describe a story/i);
+    fireEvent.change(textarea, { target: { value: 'Dragon story' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /begin the story/i }));
+    });
+
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 50));
+    });
+
+    const img = screen.getByAltText('A fierce dragon');
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute('src', '/api/images/dragon.png');
+  });
+
+  // ── New Story resets the view ─────────────────────────────────────────────
+
+  it('clicking New Story in sidebar resets to idle with prompt visible', async () => {
+    mockFetchSSE([
+      sseData({ type: 'text', chunk: 'The end.' }),
+      sseData({ type: 'done' }),
+    ]);
+
+    render(<App />);
+
+    const textarea = screen.getByPlaceholderText(/describe a story/i);
+    fireEvent.change(textarea, { target: { value: 'A story' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /begin the story/i }));
+    });
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+
+    // Now in done state — click New Story in sidebar
+    const newStoryBtns = screen.getAllByText('New Story');
+    await act(async () => {
+      fireEvent.click(newStoryBtns[0]);
+    });
+
+    // Should be back to idle with prompt
+    expect(screen.getByRole('button', { name: /begin the story/i })).toBeInTheDocument();
+  });
+
+  // ── Auth token is sent in story request ───────────────────────────────────
+
+  it('includes Authorization header when user is authenticated', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: makeSSEStream([sseData({ type: 'done' })]),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    const textarea = screen.getByPlaceholderText(/describe a story/i);
+    fireEvent.change(textarea, { target: { value: 'A story' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /begin the story/i }));
+    });
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+
+    const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = opts.headers as Record<string, string>;
+    expect(headers['Authorization']).toMatch(/^Bearer /);
   });
 });

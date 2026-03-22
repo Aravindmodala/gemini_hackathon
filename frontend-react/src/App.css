@@ -42,7 +42,7 @@ html, body, #root {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: radial-gradient(ellipse at 60% 80%, #1a0a3a 0%, #05051a 50%, #000008 100%);
+  background: linear-gradient(135deg, #050510 0%, #1a0a3a 50%, #050510 100%);
 }
 
 /* ── Header / Title Badge ───────────────────────── */
@@ -151,6 +151,76 @@ html, body, #root {
   50% { opacity: 0.35; }
 }
 
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  33% { transform: translateY(-8px) rotate(3deg); }
+  66% { transform: translateY(-4px) rotate(-2deg); }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(124, 58, 237, 0.3), inset 0 0 20px rgba(124, 58, 237, 0.1); }
+  50% { box-shadow: 0 0 32px rgba(124, 58, 237, 0.5), inset 0 0 32px rgba(124, 58, 237, 0.2); }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+@keyframes dot-bounce {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 /* ── Dev Emotion Buttons — bottom left ───────────── */
 .dev-emotions {
   position: fixed;
@@ -189,6 +259,17 @@ html, body, #root {
   background: rgba(124, 58, 237, 0.25);
   box-shadow: 0 0 20px rgba(124, 58, 237, 0.5);
   transform: scale(1.1);
+}
+
+/* ── 3D Perspective Styles ──────────────────────── */
+.book-container {
+  perspective: 1200px;
+  transform-style: preserve-3d;
+}
+
+.book-page {
+  backface-visibility: hidden;
+  will-change: transform;
 }
 
 /* ── Subtle scanline overlay ─────────────────────── */
