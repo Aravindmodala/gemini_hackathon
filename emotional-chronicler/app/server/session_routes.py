@@ -3,6 +3,7 @@
 All routes are mounted at /api/v1/sessions by factory.py.
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -34,7 +35,9 @@ async def list_sessions(
     response to retrieve the next page.
     """
     uid = user["uid"]
-    sessions, next_cursor = SessionStore.list_sessions(uid, limit=limit, cursor=cursor)
+    sessions, next_cursor = await asyncio.to_thread(
+        SessionStore.list_sessions, uid, limit=limit, cursor=cursor
+    )
     return {
         "data": sessions,
         "meta": {
@@ -48,7 +51,7 @@ async def list_sessions(
 async def get_session(session_id: str, user: dict = Depends(get_current_user)):
     """Get a single session with all interactions."""
     uid = user["uid"]
-    session = SessionStore.get_session(uid, session_id)
+    session = await asyncio.to_thread(SessionStore.get_session, uid, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"data": session}
@@ -59,10 +62,10 @@ async def delete_session(session_id: str, user: dict = Depends(get_current_user)
     """Delete a session. Returns 204 No Content on success."""
     uid = user["uid"]
     # Check existence first to distinguish 404 from 500
-    session = SessionStore.get_session(uid, session_id)
+    session = await asyncio.to_thread(SessionStore.get_session, uid, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    success = SessionStore.delete_session(uid, session_id)
+    success = await asyncio.to_thread(SessionStore.delete_session, uid, session_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete session")
     return Response(status_code=204)
@@ -77,14 +80,16 @@ async def update_session(
     """Update a session's title. Returns the updated session resource."""
     uid = user["uid"]
     # Verify session exists
-    existing = SessionStore.get_session(uid, session_id)
+    existing = await asyncio.to_thread(SessionStore.get_session, uid, session_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Session not found")
-    success = SessionStore.update_session_title(uid, session_id, body.title)
+    success = await asyncio.to_thread(
+        SessionStore.update_session_title, uid, session_id, body.title
+    )
     if not success:
         raise HTTPException(status_code=500, detail="Failed to update session")
     # Return updated resource (re-fetch to get server-side updated_at)
-    updated = SessionStore.get_session(uid, session_id)
+    updated = await asyncio.to_thread(SessionStore.get_session, uid, session_id)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to retrieve updated session")
     return {"data": updated}

@@ -33,7 +33,6 @@ os.environ.setdefault("GOOGLE_CLOUD_LOCATION", LOCATION)
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
 
 # ── Models ───────────────────────────────────────────────────
-GEMINI_LIVE_MODEL = "gemini-live-2.5-flash-native-audio"   # legacy Live API route
 STORY_MODEL = os.environ.get("STORY_MODEL", "gemini-3.1-pro-preview")  # ADK agent brain
 IMAGEN_MODEL = os.environ.get("IMAGEN_MODEL", "imagen-4.0-generate-001")  # Imagen 4
 LYRIA_MODEL = "lyria-002"  # Lyria 2 music generation
@@ -45,8 +44,10 @@ FIREBASE_ENABLED = os.environ.get("FIREBASE_ENABLED", "true").lower() in ("true"
 PORT = int(os.environ.get("PORT", 3000))
 
 # ── GenAI SDK Client (singleton) — used by Imagen 4 and Lyria 2 tools ──
-genai_client = genai.Client(
-    vertexai=True,
-    project=PROJECT_ID,
-    location=LOCATION,
-)
+_genai_client: genai.Client | None = None
+
+def get_genai_client() -> genai.Client:
+    global _genai_client
+    if _genai_client is None:
+        _genai_client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
+    return _genai_client

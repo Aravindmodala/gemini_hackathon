@@ -1,0 +1,9 @@
+{"sessionId": "811441", "hypothesisId": "H2", "location": "routes.py:ws_endpoint", "message": "WS endpoint hit", "data": {"has_token": true, "has_session_id": false, "firebase_enabled": true}, "timestamp": 1773499101363}
+{"sessionId": "811441", "hypothesisId": "H3", "location": "routes.py:ws_endpoint", "message": "token verified", "data": {"user_id": "np363mgIS7NT3hGGwVKjDBDb6ir1"}, "timestamp": 1773499105717}
+{"sessionId": "811441", "hypothesisId": "H4", "location": "routes.py:ws_endpoint", "message": "creating GeminiSession", "data": {"user_id": "np363mgIS7NT3hGGwVKjDBDb6ir1", "session_id": null}, "timestamp": 1773499105718}
+{"sessionId": "811441", "hypothesisId": "H5", "location": "session.py:start", "message": "session.start() entered", "data": {"user_id": "np363mgIS7NT3hGGwVKjDBDb6ir1", "session_id": null}, "timestamp": 1773499105720}
+{"sessionId": "811441", "hypothesisId": "H5", "location": "session.py:start", "message": "system prompt built", "data": {"prompt_len": 14802}, "timestamp": 1773499113679}
+{"sessionId": "811441", "hypothesisId": "H4", "location": "session.py:start", "message": "GCP access token obtained", "data": {"token_len": 254}, "timestamp": 1773499120196}
+{"sessionId": "811441", "hypothesisId": "H4", "location": "session.py:start", "message": "connected to Gemini WS", "data": {}, "timestamp": 1773499120770}
+{"sessionId": "811441", "hypothesisId": "H4", "location": "session.py:start", "message": "Gemini setupComplete received", "data": {}, "timestamp": 1773499121000}
+{"sessionId": "811441", "hypothesisId": "H4", "location": "session.py:start", "message": "client notified ready \u2014 relay starting", "data": {}, "timestamp": 1773499121002}

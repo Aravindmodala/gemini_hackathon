@@ -17,8 +17,9 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from google.genai import types as genai_types
 from pydantic import BaseModel, field_validator
 
 from app.config import FRONTEND_DIR, IMAGE_CACHE_DIR, MUSIC_CACHE_DIR
@@ -87,8 +88,6 @@ async def generate_story(request: StoryRequest, http_request: Request):
       {"type": "done"}                            — stream complete
       {"type": "error", "message": "..."}         — generation error (generic message)
     """
-    from google.genai import types as genai_types
-
     logger.info(
         "[Story] request_received has_auth=%s requested_user_id=%s requested_session_id=%s",
         bool(http_request.headers.get("Authorization")),
@@ -253,9 +252,10 @@ def _sse(payload: dict) -> str:
 )
 async def serve_image(filename: str):
     """Serve an Imagen 4 generated illustration."""
-    path = IMAGE_CACHE_DIR / filename
+    path = (IMAGE_CACHE_DIR / filename).resolve()
+    if not path.is_relative_to(IMAGE_CACHE_DIR.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     if not path.exists():
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(str(path), media_type="image/png")
 
@@ -271,9 +271,10 @@ async def serve_image(filename: str):
 )
 async def serve_music(filename: str):
     """Serve a Lyria 2 generated music track."""
-    path = MUSIC_CACHE_DIR / filename
+    path = (MUSIC_CACHE_DIR / filename).resolve()
+    if not path.is_relative_to(MUSIC_CACHE_DIR.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     if not path.exists():
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Music not found")
     media_type = "audio/wav" if filename.endswith(".wav") else "audio/mpeg"
     return FileResponse(str(path), media_type=media_type)

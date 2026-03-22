@@ -6,7 +6,6 @@ and includes route handlers.
 """
 
 import logging
-import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -29,8 +28,7 @@ def create_app() -> FastAPI:
 
     # ── Validate config ──────────────────────────────────────
     if not PROJECT_ID:
-        logger.error("ERROR: Set GOOGLE_CLOUD_PROJECT environment variable.")
-        sys.exit(1)
+        raise RuntimeError("GOOGLE_CLOUD_PROJECT environment variable is not set.")
 
     # ── Lifespan ─────────────────────────────────────────────
     @asynccontextmanager

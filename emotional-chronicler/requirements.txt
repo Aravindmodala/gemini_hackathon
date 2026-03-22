@@ -14,6 +14,9 @@ google-genai>=1.0.0
 google-auth>=2.35.0
 python-dotenv>=1.0.0
 
+# Async HTTP client (used by Lyria tool to avoid blocking the event loop)
+httpx>=0.27.0
+
 # Firebase Authentication
 firebase-admin>=6.0.0
 

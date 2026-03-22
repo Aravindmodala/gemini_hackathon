@@ -18,9 +18,11 @@ class TestGenerateImage:
         mock_response = MagicMock()
         mock_response.generated_images = [mock_image]
 
-        with patch("app.tools.imagen.genai_client") as mock_client, \
+        mock_client = MagicMock()
+        mock_client.models.generate_images.return_value = mock_response
+
+        with patch("app.tools.imagen.get_genai_client", return_value=mock_client), \
              patch("app.tools.imagen.IMAGE_CACHE_DIR", tmp_path):
-            mock_client.models.generate_images.return_value = mock_response
 
             from app.tools.imagen import generate_image
             result = await generate_image("A dragon soaring over mountains")
@@ -41,9 +43,11 @@ class TestGenerateImage:
         mock_response = MagicMock()
         mock_response.generated_images = [mock_image]
 
-        with patch("app.tools.imagen.genai_client") as mock_client, \
+        mock_client = MagicMock()
+        mock_client.models.generate_images.return_value = mock_response
+
+        with patch("app.tools.imagen.get_genai_client", return_value=mock_client), \
              patch("app.tools.imagen.IMAGE_CACHE_DIR", tmp_path):
-            mock_client.models.generate_images.return_value = mock_response
 
             from app.tools.imagen import generate_image
             result = await generate_image("A forest at dawn")
@@ -62,10 +66,12 @@ class TestGenerateImage:
         mock_response = MagicMock()
         mock_response.generated_images = [mock_image]
 
-        with patch("app.tools.imagen.genai_client") as mock_client, \
+        mock_client = MagicMock()
+        mock_client.models.generate_images.return_value = mock_response
+
+        with patch("app.tools.imagen.get_genai_client", return_value=mock_client), \
              patch("app.tools.imagen.IMAGE_CACHE_DIR", tmp_path), \
              patch("app.tools.imagen.IMAGEN_MODEL", "imagen-4.0-generate-001"):
-            mock_client.models.generate_images.return_value = mock_response
 
             from app.tools.imagen import generate_image
             await generate_image("A river scene")
@@ -81,9 +87,11 @@ class TestGenerateImage:
         mock_response = MagicMock()
         mock_response.generated_images = [mock_image]
 
-        with patch("app.tools.imagen.genai_client") as mock_client, \
+        mock_client = MagicMock()
+        mock_client.models.generate_images.return_value = mock_response
+
+        with patch("app.tools.imagen.get_genai_client", return_value=mock_client), \
              patch("app.tools.imagen.IMAGE_CACHE_DIR", tmp_path):
-            mock_client.models.generate_images.return_value = mock_response
 
             from app.tools.imagen import generate_image
             await generate_image("A city skyline")
@@ -99,9 +107,11 @@ class TestGenerateImage:
         mock_response = MagicMock()
         mock_response.generated_images = []
 
-        with patch("app.tools.imagen.genai_client") as mock_client, \
+        mock_client = MagicMock()
+        mock_client.models.generate_images.return_value = mock_response
+
+        with patch("app.tools.imagen.get_genai_client", return_value=mock_client), \
              patch("app.tools.imagen.IMAGE_CACHE_DIR", tmp_path):
-            mock_client.models.generate_images.return_value = mock_response
 
             from app.tools.imagen import generate_image
             result = await generate_image("Test scene")
@@ -112,9 +122,11 @@ class TestGenerateImage:
     @pytest.mark.asyncio
     async def test_generate_image_exception_returns_error(self, tmp_path):
         """API exception → returns error dict (does not raise)."""
-        with patch("app.tools.imagen.genai_client") as mock_client, \
+        mock_client = MagicMock()
+        mock_client.models.generate_images.side_effect = RuntimeError("Quota exceeded")
+
+        with patch("app.tools.imagen.get_genai_client", return_value=mock_client), \
              patch("app.tools.imagen.IMAGE_CACHE_DIR", tmp_path):
-            mock_client.models.generate_images.side_effect = RuntimeError("Quota exceeded")
 
             from app.tools.imagen import generate_image
             result = await generate_image("Any scene")
@@ -132,9 +144,11 @@ class TestGenerateImage:
         mock_response = MagicMock()
         mock_response.generated_images = [mock_image]
 
-        with patch("app.tools.imagen.genai_client") as mock_client, \
+        mock_client = MagicMock()
+        mock_client.models.generate_images.return_value = mock_response
+
+        with patch("app.tools.imagen.get_genai_client", return_value=mock_client), \
              patch("app.tools.imagen.IMAGE_CACHE_DIR", tmp_path):
-            mock_client.models.generate_images.return_value = mock_response
 
             from app.tools.imagen import generate_image
             result = await generate_image(long_description)
@@ -149,9 +163,11 @@ class TestGenerateImage:
         mock_response = MagicMock()
         mock_response.generated_images = [mock_image]
 
-        with patch("app.tools.imagen.genai_client") as mock_client, \
+        mock_client = MagicMock()
+        mock_client.models.generate_images.return_value = mock_response
+
+        with patch("app.tools.imagen.get_genai_client", return_value=mock_client), \
              patch("app.tools.imagen.IMAGE_CACHE_DIR", tmp_path):
-            mock_client.models.generate_images.return_value = mock_response
 
             from app.tools.imagen import generate_image
             await generate_image("A knight", style="oil painting")
@@ -169,9 +185,11 @@ class TestGenerateImage:
         mock_response = MagicMock()
         mock_response.generated_images = [mock_image]
 
-        with patch("app.tools.imagen.genai_client") as mock_client, \
+        mock_client = MagicMock()
+        mock_client.models.generate_images.return_value = mock_response
+
+        with patch("app.tools.imagen.get_genai_client", return_value=mock_client), \
              patch("app.tools.imagen.IMAGE_CACHE_DIR", tmp_path):
-            mock_client.models.generate_images.return_value = mock_response
 
             from app.tools.imagen import generate_image
             result1 = await generate_image("Scene 1")

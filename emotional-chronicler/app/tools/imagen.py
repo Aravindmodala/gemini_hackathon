@@ -13,7 +13,7 @@ import uuid
 
 from google.genai import types as genai_types
 
-from app.config import genai_client, IMAGEN_MODEL, IMAGE_CACHE_DIR
+from app.config import get_genai_client, IMAGEN_MODEL, IMAGE_CACHE_DIR
 
 logger = logging.getLogger("chronicler")
 
@@ -47,7 +47,7 @@ async def generate_image(
         full_prompt = f"{scene_description}. Style: {style}"
         logger.info(f"[Imagen] Generating: '{scene_description[:80]}...'")
 
-        response = genai_client.models.generate_images(
+        response = get_genai_client().models.generate_images(
             model=IMAGEN_MODEL,
             prompt=full_prompt,
             config=genai_types.GenerateImagesConfig(

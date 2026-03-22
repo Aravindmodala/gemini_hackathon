@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(python -m pytest tests/test_routes.py tests/test_session_routes.py -v --tb=short)",
+      "Bash(python -m pytest --tb=short -q)",
+      "Bash(python -m pytest tests/test_store.py tests/test_routes.py tests/test_session_routes.py -v --tb=short -q)",
+      "Bash(python -m pytest --tb=line -q)"
+    ]
+  }
+}

@@ -23,7 +23,7 @@ def _get_db() -> firestore.Client | None:
             _db = firestore.Client(project=PROJECT_ID)
             logger.info("[Store] Firestore client initialized")
         except Exception as e:
-            logger.warning(f"[Store] Firestore unavailable: {e}")
+            logger.warning("[Store] Firestore unavailable: %s", e)
             _db_available = False
             return None
     return _db
@@ -74,7 +74,7 @@ class SessionStore:
 
     def create_session(self, title: str = "Untitled Story") -> str:
         """Create a new session document in Firestore. Returns session_id."""
-        self.session_id = uuid.uuid4().hex[:12]
+        self.session_id = uuid.uuid4().hex
 
         if not self._db:
             logger.warning("[Store] Firestore unavailable — session not persisted")
@@ -98,11 +98,11 @@ class SessionStore:
                 "interactions": [],
             })
         except Exception as e:
-            logger.warning(f"[Store] Failed to create session: {e}")
+            logger.warning("[Store] Failed to create session: %s", e)
             self._doc_ref = None
 
         logger.info(
-            f"[Store] Session created: {self.user_id}/{self.session_id}"
+            "[Store] Session created: %s/%s", self.user_id, self.session_id
         )
         return self.session_id
 
@@ -129,7 +129,7 @@ class SessionStore:
                 "updated_at": datetime.now(timezone.utc),
             })
         except Exception as e:
-            logger.warning(f"[Store] Failed to log interaction: {e}")
+            logger.warning("[Store] Failed to log interaction: %s", e)
 
     def log_tool_call(self, name: str, args: dict) -> None:
         """Append a tool call record to the session log."""
@@ -149,7 +149,7 @@ class SessionStore:
                 "updated_at": datetime.now(timezone.utc),
             })
         except Exception as e:
-            logger.warning(f"[Store] Failed to log tool call: {e}")
+            logger.warning("[Store] Failed to log tool call: %s", e)
 
     def end_session(self) -> None:
         """Mark the session as ended."""
@@ -162,10 +162,10 @@ class SessionStore:
                 "updated_at": datetime.now(timezone.utc),
             })
             logger.info(
-                f"[Store] Session ended: {self.user_id}/{self.session_id}"
+                "[Store] Session ended: %s/%s", self.user_id, self.session_id
             )
         except Exception as e:
-            logger.warning(f"[Store] Failed to end session: {e}")
+            logger.warning("[Store] Failed to end session: %s", e)
 
     def resume_session(self, session_id: str) -> bool:
         """Attach to an existing session. Returns True if it exists in Firestore.
@@ -192,7 +192,7 @@ class SessionStore:
                 .document(self.session_id)
             )
         except Exception as e:
-            logger.warning(f"[Store] Failed to init doc ref: {e}")
+            logger.warning("[Store] Failed to init doc ref: %s", e)
             self._doc_ref = None
 
     def _verify_session_exists(self) -> bool:
@@ -203,7 +203,7 @@ class SessionStore:
             doc = self._doc_ref.get()
             return doc.exists
         except Exception as e:
-            logger.warning(f"[Store] Failed to verify session: {e}")
+            logger.warning("[Store] Failed to verify session: %s", e)
             return False
 
     def get_session_context(self) -> str | None:
@@ -254,7 +254,7 @@ class SessionStore:
                 f"═══════════════════════════════════════════════════════════════"
             )
         except Exception as e:
-            logger.warning(f"[Store] Failed to load session context: {e}")
+            logger.warning("[Store] Failed to load session context: %s", e)
             return None
 
     def get_previous_context(self) -> str | None:
@@ -323,7 +323,7 @@ class SessionStore:
             )
 
         except Exception as e:
-            logger.warning(f"[Store] Failed to load previous context: {e}")
+            logger.warning("[Store] Failed to load previous context: %s", e)
             return None
 
     # ── Static query methods (for REST API) ───────────────────
@@ -382,7 +382,7 @@ class SessionStore:
             return sessions, next_cursor
 
         except Exception as e:
-            logger.warning(f"[Store] Failed to list sessions: {e}")
+            logger.warning("[Store] Failed to list sessions: %s", e)
             return [], None
 
     @staticmethod
@@ -411,7 +411,7 @@ class SessionStore:
                 "interactions": data.get("interactions", []),
             }
         except Exception as e:
-            logger.warning(f"[Store] Failed to get session: {e}")
+            logger.warning("[Store] Failed to get session: %s", e)
             return None
 
     @staticmethod
@@ -428,10 +428,10 @@ class SessionStore:
                 .document(session_id)
             )
             doc_ref.delete()
-            logger.info(f"[Store] Session deleted: {user_id}/{session_id}")
+            logger.info("[Store] Session deleted: %s/%s", user_id, session_id)
             return True
         except Exception as e:
-            logger.warning(f"[Store] Failed to delete session: {e}")
+            logger.warning("[Store] Failed to delete session: %s", e)
             return False
 
     @staticmethod
@@ -450,5 +450,5 @@ class SessionStore:
             doc_ref.update({"title": title, "updated_at": datetime.now(timezone.utc)})
             return True
         except Exception as e:
-            logger.warning(f"[Store] Failed to update title: {e}")
+            logger.warning("[Store] Failed to update title: %s", e)
             return False
