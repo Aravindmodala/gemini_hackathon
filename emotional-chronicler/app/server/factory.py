@@ -19,6 +19,7 @@ from app.server.errors import http_exception_handler, validation_exception_handl
 from app.server.middleware import setup_middleware
 from app.server.routes import router, api_router
 from app.server.session_routes import router as session_router
+from app.server.chat_routes import chat_router
 
 logger = logging.getLogger("chronicler")
 
@@ -70,5 +71,6 @@ def create_app() -> FastAPI:
     # Versioned API routes
     app.include_router(api_router, prefix="/api/v1")
     app.include_router(session_router, prefix="/api/v1")
+    app.include_router(chat_router, prefix="/api/v1")
 
     return app

@@ -12,9 +12,10 @@ const SUGGESTIONS = [
 interface StoryPromptProps {
   onSubmit: (prompt: string) => void;
   disabled?: boolean;
+  onTalkToElora?: () => void;
 }
 
-export function StoryPrompt({ onSubmit, disabled }: StoryPromptProps) {
+export function StoryPrompt({ onSubmit, disabled, onTalkToElora }: StoryPromptProps) {
   const [prompt, setPrompt] = useState('');
   const [textareaFocused, setTextareaFocused] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -124,7 +125,36 @@ export function StoryPrompt({ onSubmit, disabled }: StoryPromptProps) {
         </button>
       </div>
 
-      <p style={styles.hint}>⌘ Enter to begin</p>
+      {/* Talk to Elora button */}
+      {onTalkToElora && (
+        <button
+          onClick={onTalkToElora}
+          disabled={disabled}
+          style={{
+            ...styles.talkToEloraBtn,
+            ...(disabled ? styles.submitBtnDisabled : {}),
+          }}
+          onMouseEnter={(e) => {
+            if (!disabled) {
+              const btn = e.currentTarget;
+              btn.style.transform = 'translateY(-2px)';
+              btn.style.borderColor = 'rgba(124,58,237,0.6)';
+              btn.style.boxShadow = '0 0 24px rgba(124, 58, 237, 0.3)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            const btn = e.currentTarget;
+            btn.style.transform = 'translateY(0)';
+            btn.style.borderColor = 'rgba(124,58,237,0.35)';
+            btn.style.boxShadow = 'none';
+          }}
+        >
+          <span style={{ fontSize: 14 }}>✦</span>
+          <span>Talk to Elora first</span>
+        </button>
+      )}
+
+      <p style={styles.hint}>⌘ Enter to begin · or talk to Elora to craft a personalized story</p>
     </div>
   );
 }
@@ -234,6 +264,23 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'not-allowed',
     boxShadow: 'none',
   },
+  talkToEloraBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: '12px 24px',
+    background: 'transparent',
+    border: '1px solid rgba(124,58,237,0.35)',
+    borderRadius: 10,
+    color: '#a78bfa',
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: "'Cinzel', 'Georgia', serif",
+    cursor: 'pointer',
+    transition: 'all 200ms ease',
+    letterSpacing: '0.06em',
+  } as React.CSSProperties,
   hint: {
     fontFamily: "'Inter', sans-serif",
     fontSize: 11,

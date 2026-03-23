@@ -6,9 +6,11 @@ import { BookView } from './components/BookView';
 import { AuthScreen } from './components/AuthScreen';
 import { SessionSidebar } from './components/SessionSidebar';
 import { EmptyState } from './components/EmptyState';
+import { CompanionChat } from './components/CompanionChat';
 import { useAuth } from './contexts/AuthContext';
 import { useStoryteller } from './hooks/useStoryteller';
 import { useSessions } from './hooks/useSessions';
+import { useCompanionChat } from './hooks/useCompanionChat';
 import type { StorySection } from './hooks/useStoryteller';
 import type { Interaction } from './types/session';
 import './App.css';
@@ -39,37 +41,82 @@ const loadingStyles: Record<string, CSSProperties> = {
   text: { fontFamily: "'Cinzel', serif", fontSize: 14, color: '#94a3b8', letterSpacing: '0.12em' },
 };
 
-/* ══════════════════════════════════════════════════════
+/* ══════════════════════════════════════════════════════════════
    App — gated on authentication
-   ══════════════════════════════════════════════════════ */
+   Flow: idle → conversing → narrating → done
+   ══════════════════════════════════════════════════════════════ */
 
 function App() {
   const { user, loading, signOut, getIdToken } = useAuth();
 
   const { sessions, loading: sessionsLoading, fetchSessions, getSessionDetail, deleteSession, renameSession } = useSessions();
 
-  const { status, sections, currentMusic, startStory, stopStory } = useStoryteller({ getIdToken });
+  const { status, sections, storyTitle, startStory, stopStory } = useStoryteller({ getIdToken });
+
+  const {
+    messages: chatMessages,
+    isStreaming: chatStreaming,
+    sendMessage,
+    clearMessages,
+    sessionId: companionSessionId,
+    proposal,
+    dismissProposal,
+  } = useCompanionChat({ getIdToken });
 
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [hydratedSections, setHydratedSections] = useState<StorySection[]>([]);
+  const [isConversing, setIsConversing] = useState(false);
 
+  // ── Start companion conversation ──────────────────────────────────────────
+  const handleBeginConversation = useCallback(() => {
+    setIsConversing(true);
+    setActiveSessionId(null);
+    setHydratedSections([]);
+  }, []);
+
+  // ── "Start the Journey" — transition from companion to story ──────────────
+  const handleStartJourney = useCallback(() => {
+    if (!proposal) return;
+
+    setIsConversing(false);
+
+    // Start story with companion context
+    const storyPrompt = `${proposal.title}: ${proposal.brief}`;
+    void startStory(storyPrompt, companionSessionId ?? undefined);
+    void fetchSessions();
+  }, [proposal, companionSessionId, startStory, fetchSessions]);
+
+  // ── "Not ready yet" — dismiss proposal, keep conversing ───────────────────
+  const handleNotReady = useCallback(() => {
+    dismissProposal();
+    // Send a follow-up to Elora so she knows
+    sendMessage("I'm not ready yet, let's keep talking.");
+  }, [dismissProposal, sendMessage]);
+
+  // ── New story (reset everything) ──────────────────────────────────────────
   const handleNewStory = useCallback(() => {
     stopStory();
     setActiveSessionId(null);
     setHydratedSections([]);
-  }, [stopStory]);
+    setIsConversing(false);
+    clearMessages();
+  }, [stopStory, clearMessages]);
 
+  // ── Direct story start (from StoryPrompt — fallback if user types prompt directly)
   const handleBeginStory = (prompt: string) => {
     setActiveSessionId(null);
     setHydratedSections([]);
+    setIsConversing(false);
     void startStory(prompt);
     void fetchSessions();
   };
 
+  // ── Session selection ─────────────────────────────────────────────────────
   const handleSelectSession = useCallback(async (sessionId: string) => {
     stopStory();
     setActiveSessionId(sessionId);
+    setIsConversing(false);
 
     try {
       const detail = await getSessionDetail(sessionId);
@@ -126,7 +173,7 @@ function App() {
 
   const storySections = activeSessionId ? hydratedSections : sections;
   const showStory = storySections.length > 0;
-  const showPrompt = (status === 'idle' || status === 'error') && !showStory;
+  const showPrompt = (status === 'idle' || status === 'error') && !showStory && !isConversing;
 
   /* ── Auth gates ─────────────────────────────────────────── */
   if (loading) return <LoadingScreen />;
@@ -171,18 +218,34 @@ function App() {
         </header>
 
         {/* Empty state — shown when app loads and no story exists */}
-        {!showStory && status === 'idle' && (
+        {!showStory && status === 'idle' && !isConversing && (
           <EmptyState />
         )}
 
+        {/* Pre-story companion chat — shown when conversing */}
+        <CompanionChat
+          messages={chatMessages}
+          isStreaming={chatStreaming}
+          onSend={sendMessage}
+          onClear={() => { clearMessages(); setIsConversing(false); }}
+          proposal={proposal}
+          onStartJourney={handleStartJourney}
+          onNotReady={handleNotReady}
+          visible={isConversing && !showStory}
+        />
+
         {/* 3D Book view — shown once content starts arriving */}
         {showStory && (
-          <BookView sections={storySections} status={status} onClose={handleNewStory} />
+          <BookView sections={storySections} status={status} onClose={handleNewStory} title={storyTitle ?? undefined} />
         )}
 
-        {/* Prompt input — shown when idle */}
+        {/* Prompt input — shown when idle (includes "Talk to Elora" option) */}
         {showPrompt && (
-          <StoryPrompt onSubmit={handleBeginStory} disabled={status !== 'idle'} />
+          <StoryPrompt
+            onSubmit={handleBeginStory}
+            disabled={status !== 'idle'}
+            onTalkToElora={handleBeginConversation}
+          />
         )}
 
         {/* Status badge + stop/new-story controls */}

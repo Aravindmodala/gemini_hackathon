@@ -27,6 +27,7 @@ interface BookViewProps {
   sections: StorySection[];
   status: 'idle' | 'generating' | 'done' | 'error';
   onClose: () => void;
+  title?: string;
 }
 
 // ── Sub-component: renders page content (text, images, music) ─
@@ -130,7 +131,7 @@ function VoiceBtn({ isPlaying, onToggle }: VoiceBtnProps) {
 }
 
 // ── Main BookView ─────────────────────────────────────────────
-export function BookView({ sections, status, onClose }: BookViewProps) {
+export function BookView({ sections, status, onClose, title }: BookViewProps) {
   const pages = paginate(sections);
 
   // Which page is currently the "right page" (active/primary)
@@ -264,7 +265,7 @@ export function BookView({ sections, status, onClose }: BookViewProps) {
 
               {/* Left page — previous content (static) */}
               <div className={styles.pageLeft} aria-label="Previous page">
-                <PageContent page={leftPage} emptyLabel="Beginning of the story" />
+                <PageContent page={leftPage} emptyLabel={title || 'Beginning of the story'} />
               </div>
 
               {/* Right page — flip container */}

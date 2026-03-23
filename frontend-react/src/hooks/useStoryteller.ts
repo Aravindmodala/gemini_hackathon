@@ -21,6 +21,8 @@ export function useStoryteller(options?: StorytellerOptions) {
   const [status, setStatus] = useState<StoryStatus>('idle');
   const [sections, setSections] = useState<StorySection[]>([]);
   const [currentMusic, setCurrentMusic] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [storyTitle, setStoryTitle] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -54,7 +56,7 @@ export function useStoryteller(options?: StorytellerOptions) {
 
   // ── Start story ─────────────────────────────────────────────────────────────
 
-  const startStory = useCallback(async (prompt: string) => {
+  const startStory = useCallback(async (prompt: string, companionSessionId?: string) => {
     // Abort any in-flight request
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -68,6 +70,8 @@ export function useStoryteller(options?: StorytellerOptions) {
     }
 
     setSections([]);
+    setSessionId(null);
+    setStoryTitle(null);
     setStatus('generating');
 
     try {
@@ -82,7 +86,10 @@ export function useStoryteller(options?: StorytellerOptions) {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          prompt,
+          ...(companionSessionId ? { companion_session_id: companionSessionId } : {}),
+        }),
         signal: controller.signal,
       });
 
@@ -115,6 +122,14 @@ export function useStoryteller(options?: StorytellerOptions) {
           }
 
           switch (event.type) {
+            case 'session':
+              setSessionId(event.session_id as string);
+              break;
+
+            case 'title':
+              setStoryTitle(event.title as string);
+              break;
+
             case 'text':
               appendText(event.chunk as string);
               break;
@@ -187,6 +202,8 @@ export function useStoryteller(options?: StorytellerOptions) {
     status,
     sections,
     currentMusic,
+    sessionId,
+    storyTitle,
     startStory,
     stopStory,
   };
