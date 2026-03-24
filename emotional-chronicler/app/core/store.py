@@ -167,6 +167,102 @@ class SessionStore:
         except Exception as e:
             logger.warning("[Store] Failed to end session: %s", e)
 
+    def log_companion_proposal(
+        self, title: str, brief: str, emotions: list, genre: str = "", tone: str = ""
+    ) -> None:
+        """Save the companion's story proposal alongside the session."""
+        if not self._doc_ref:
+            return
+
+        try:
+            self._doc_ref.update({
+                "companion_proposal": {
+                    "title": title,
+                    "brief": brief,
+                    "emotions": emotions,
+                    "genre": genre,
+                    "tone": tone,
+                    "proposed_at": datetime.now(timezone.utc).isoformat(),
+                },
+                "title": title,  # Also update the session title
+                "updated_at": datetime.now(timezone.utc),
+            })
+            logger.info("[Store] Companion proposal saved: %s", title)
+        except Exception as e:
+            logger.warning("[Store] Failed to save companion proposal: %s", e)
+
+    def get_companion_context(self) -> str | None:
+        """
+        Format companion interactions as narrative context for the story agent.
+
+        Returns a formatted string with the traveler's emotions, the proposed
+        story title/brief, and the conversation history — ready to be injected
+        into Elora's story prompt.
+        """
+        if not self._doc_ref:
+            return None
+
+        try:
+            doc = self._doc_ref.get()
+            if not doc.exists:
+                return None
+
+            data = doc.to_dict()
+            interactions = data.get("interactions", [])
+            proposal = data.get("companion_proposal", {})
+
+            if not interactions and not proposal:
+                return None
+
+            lines = []
+
+            # Proposal context
+            if proposal:
+                lines.append(f"STORY TITLE: {proposal.get('title', 'Untitled')}")
+                lines.append(f"STORY BRIEF: {proposal.get('brief', '')}")
+                emotions = proposal.get("emotions", [])
+                if emotions:
+                    lines.append(f"TRAVELER'S EMOTIONS: {', '.join(emotions)}")
+                genre = proposal.get("genre", "")
+                if genre:
+                    lines.append(f"GENRE: {genre}")
+                tone = proposal.get("tone", "")
+                if tone:
+                    lines.append(f"TONE: {tone}")
+                lines.append("")
+
+            # Conversation history
+            if interactions:
+                lines.append("COMPANION CONVERSATION:")
+                for entry in interactions[-30:]:
+                    role = entry.get("role", "")
+                    text = entry.get("text", "")
+                    if role == "user" and text:
+                        lines.append(f'  Traveler: "{text}"')
+                    elif role == "elora" and text:
+                        lines.append(f'  Elora: "{text}"')
+
+            if not lines:
+                return None
+
+            context = "\n".join(lines)
+            return (
+                "\n\n═══════════════════════════════════════════════════════════════\n"
+                "COMPANION CONTEXT — THE TRAVELER'S EMOTIONAL STATE\n"
+                "═══════════════════════════════════════════════════════════════\n\n"
+                "Before this story begins, you (Elora) had a conversation with this "
+                "traveler to understand their mood and what kind of story they need. "
+                "Here is what you learned:\n\n"
+                f"{context}\n\n"
+                "Use this context to shape every aspect of the story — its tone, "
+                "themes, emotional arc, and imagery. The traveler chose this story "
+                "because it resonates with how they feel right now. Honor that.\n"
+                "═══════════════════════════════════════════════════════════════"
+            )
+
+        except Exception as e:
+            logger.warning("[Store] Failed to load companion context: %s", e)
+            return None
     def resume_session(self, session_id: str) -> bool:
         """Attach to an existing session. Returns True if it exists in Firestore.
 

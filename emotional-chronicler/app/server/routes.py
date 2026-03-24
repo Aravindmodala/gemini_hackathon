@@ -51,6 +51,7 @@ class StoryRequest(BaseModel):
     prompt: str
     user_id: Optional[str] = None
     session_id: Optional[str] = None
+    companion_session_id: Optional[str] = None
 
     @field_validator("prompt")
     @classmethod
@@ -162,9 +163,37 @@ async def generate_story(request: StoryRequest, http_request: Request):
                     session_id,
                 )
 
+            # Load companion context if available
+            prompt_text = request.prompt
+            if request.companion_session_id and is_authenticated:
+                companion_store = SessionStore(user_id)
+                if companion_store.resume_session(request.companion_session_id):
+                    companion_context = companion_store.get_companion_context()
+                    if companion_context:
+                        prompt_text = f"{companion_context}\n\nThe traveler is ready. Begin the story now.\n\nOriginal prompt: {request.prompt}"
+                        logger.info(
+                            "[Story] companion_context_loaded session_id=%s",
+                            request.companion_session_id,
+                        )
+                        # Update story session title from companion's proposal
+                        try:
+                            doc = companion_store._doc_ref.get()
+                            if doc.exists:
+                                proposal = doc.to_dict().get("companion_proposal", {})
+                                proposed_title = proposal.get("title", "")
+                                if proposed_title and store:
+                                    store._doc_ref.update({"title": proposed_title})
+                                    logger.info("[Story] session_title_set title=%s", proposed_title)
+                        except Exception as e:
+                            logger.warning("[Story] Failed to set session title: %s", e)
+
+                        # Emit title to frontend via SSE
+                        if proposal.get("title"):
+                            yield _sse({"type": "title", "title": proposal["title"], "brief": proposal.get("brief", "")})
+
             new_message = genai_types.Content(
                 role="user",
-                parts=[genai_types.Part(text=request.prompt)],
+                parts=[genai_types.Part(text=prompt_text)],
             )
 
             async for event in runner.run_async(
