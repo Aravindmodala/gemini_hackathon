@@ -134,20 +134,26 @@ export function useStoryteller(options?: StorytellerOptions) {
               appendText(event.chunk as string);
               break;
 
-            case 'image':
+            case 'image': {
+              const imgUrl = (event.url as string).startsWith('/')
+                ? `${API_BASE}${event.url as string}`
+                : (event.url as string);
               setSections(prev => [
                 ...prev,
-                { type: 'image', url: event.url as string, caption: (event.caption as string) ?? '' },
+                { type: 'image', url: imgUrl, caption: (event.caption as string) ?? '' },
               ]);
               break;
+            }
 
             case 'music': {
-              const url = event.url as string;
+              const musicUrl = (event.url as string).startsWith('/')
+                ? `${API_BASE}${event.url as string}`
+                : (event.url as string);
               setSections(prev => [
                 ...prev,
-                { type: 'music', url, duration: (event.duration as number) ?? 33 },
+                { type: 'music', url: musicUrl, duration: (event.duration as number) ?? 33 },
               ]);
-              playMusic(url);
+              playMusic(musicUrl);
               break;
             }
 

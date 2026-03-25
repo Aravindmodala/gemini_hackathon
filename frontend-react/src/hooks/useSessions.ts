@@ -5,7 +5,7 @@ import type { Session, SessionDetail } from '../types/session';
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export function useSessions() {
-  const { getIdToken } = useAuth();
+  const { getIdToken, user, loading: authLoading } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,10 +78,16 @@ export function useSessions() {
     }
   }, [getIdToken]);
 
-  // Fetch on mount
+  // Fetch once auth is ready and user is logged in
   useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+    if (!authLoading && user) {
+      fetchSessions();
+    }
+    if (!authLoading && !user) {
+      setSessions([]);
+      setLoading(false);
+    }
+  }, [authLoading, user, fetchSessions]);
 
   return {
     sessions,

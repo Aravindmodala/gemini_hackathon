@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AvatarHUD } from './components/AvatarHUD';
 import { StoryPrompt } from './components/StoryPrompt';
-import { BookView } from './components/BookView';
+import { Book3D } from './components/Book3D';
 import { AuthScreen } from './components/AuthScreen';
 import { SessionSidebar } from './components/SessionSidebar';
 import { EmptyState } from './components/EmptyState';
@@ -14,6 +14,13 @@ import { useCompanionChat } from './hooks/useCompanionChat';
 import type { StorySection } from './hooks/useStoryteller';
 import type { Interaction } from './types/session';
 import './App.css';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+/** Prefix relative URLs (from Firestore) with the API base so assets resolve correctly. */
+function resolveAssetUrl(url: string): string {
+  return url.startsWith('/') ? `${API_BASE}${url}` : url;
+}
 
 /* ── Loading spinner shown while Firebase resolves auth state ── */
 function LoadingScreen() {
@@ -142,7 +149,7 @@ function App() {
         if (imageUrl) {
           nextSections.push({
             type: 'image',
-            url: imageUrl,
+            url: resolveAssetUrl(imageUrl),
             caption: typeof (args as Record<string, unknown>).caption === 'string'
               ? (args as { caption: string }).caption
               : '',
@@ -152,7 +159,7 @@ function App() {
         if (musicUrl) {
           nextSections.push({
             type: 'music',
-            url: musicUrl,
+            url: resolveAssetUrl(musicUrl),
             duration: typeof (args as Record<string, unknown>).duration === 'number'
               ? (args as { duration: number }).duration
               : 33,
@@ -236,7 +243,7 @@ function App() {
 
         {/* 3D Book view — shown once content starts arriving */}
         {showStory && (
-          <BookView sections={storySections} status={status} onClose={handleNewStory} title={storyTitle ?? undefined} />
+          <Book3D sections={storySections} status={status} onClose={handleNewStory} title={storyTitle ?? undefined} />
         )}
 
         {/* Prompt input — shown when idle (includes "Talk to Elora" option) */}

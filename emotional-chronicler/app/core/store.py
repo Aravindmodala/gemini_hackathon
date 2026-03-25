@@ -263,6 +263,21 @@ class SessionStore:
         except Exception as e:
             logger.warning("[Store] Failed to load companion context: %s", e)
             return None
+
+    def get_companion_title(self) -> tuple[str, str] | tuple[None, None]:
+        """Return (title, brief) from the companion proposal, or (None, None) if unavailable."""
+        if not self._doc_ref:
+            return None, None
+        try:
+            doc = self._doc_ref.get()
+            if not doc.exists:
+                return None, None
+            proposal = doc.to_dict().get("companion_proposal", {})
+            return proposal.get("title") or None, proposal.get("brief", "")
+        except Exception as e:
+            logger.warning("[Store] Failed to get companion title: %s", e)
+            return None, None
+
     def resume_session(self, session_id: str) -> bool:
         """Attach to an existing session. Returns True if it exists in Firestore.
 
