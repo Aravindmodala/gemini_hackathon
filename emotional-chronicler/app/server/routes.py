@@ -135,6 +135,8 @@ async def generate_story(request: StoryRequest, http_request: Request):
 
     async def event_stream():
         elora_text_buffer: list[str] = []
+        elora_buffered_chars: int = 0
+        ELORA_FLUSH_CHARS = 800  # flush to Firestore every ~800 characters
         try:
             logger.info(
                 "[Story] stream_start user_id=%s session_id=%s decision=%s",
@@ -222,6 +224,12 @@ async def generate_story(request: StoryRequest, http_request: Request):
                     if part.text:
                         yield _sse({"type": "text", "chunk": part.text})
                         elora_text_buffer.append(part.text)
+                        elora_buffered_chars += len(part.text)
+                        # Flush to Firestore periodically so content survives interruptions
+                        if store_ref and elora_buffered_chars >= ELORA_FLUSH_CHARS:
+                            await asyncio.to_thread(store_ref.log_interaction, "elora", "".join(elora_text_buffer))
+                            elora_text_buffer.clear()
+                            elora_buffered_chars = 0
 
                     # ── Tool response (image or music) ────────
                     elif part.function_response:

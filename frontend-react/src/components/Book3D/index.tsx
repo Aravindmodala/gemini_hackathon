@@ -11,9 +11,10 @@ interface Book3DProps {
   status: 'idle' | 'generating' | 'done' | 'error';
   onClose: () => void;
   title?: string;
+  autoOpen?: boolean;
 }
 
-export function Book3D({ sections, status, onClose, title }: Book3DProps) {
+export function Book3D({ sections, status, onClose, title, autoOpen }: Book3DProps) {
   const pages = paginate(sections);
   const {
     currentPageIdx,
@@ -35,6 +36,13 @@ export function Book3D({ sections, status, onClose, title }: Book3DProps) {
     // Delay the parent onClose so the animation plays
     setTimeout(onClose, 1300);
   }, [closeBook, onClose]);
+
+  // Auto-open the book when loading a historical session
+  useEffect(() => {
+    if (autoOpen) {
+      openBook();
+    }
+  }, [autoOpen, openBook]);
 
   // Keyboard navigation
   useEffect(() => {

@@ -123,10 +123,13 @@ function App() {
   const handleSelectSession = useCallback(async (sessionId: string) => {
     stopStory();
     setActiveSessionId(sessionId);
+    setHydratedSections([]);
     setIsConversing(false);
 
     try {
       const detail = await getSessionDetail(sessionId);
+      console.log('[Session] loaded detail:', detail);
+      console.log('[Session] interactions:', detail.interactions);
       const nextSections: StorySection[] = [];
 
       for (const interaction of detail.interactions as Interaction[]) {
@@ -167,8 +170,16 @@ function App() {
         }
       }
 
+      console.log('[Session] built sections:', nextSections);
+      if (nextSections.length === 0) {
+        // Session exists but has no saved content (interrupted generation)
+        console.warn('[Session] no content found for session:', sessionId);
+        setActiveSessionId(null);
+      }
       setHydratedSections(nextSections);
-    } catch {
+    } catch (err) {
+      console.error('[Session] failed to load session detail:', err);
+      setActiveSessionId(null);
       setHydratedSections([]);
     }
   }, [getSessionDetail, stopStory]);
@@ -243,7 +254,14 @@ function App() {
 
         {/* 3D Book view — shown once content starts arriving */}
         {showStory && (
-          <Book3D sections={storySections} status={status} onClose={handleNewStory} title={storyTitle ?? undefined} />
+          <Book3D
+            key={activeSessionId ?? 'live'}
+            sections={storySections}
+            status={status}
+            onClose={handleNewStory}
+            title={storyTitle ?? undefined}
+            autoOpen={!!activeSessionId}
+          />
         )}
 
         {/* Prompt input — shown when idle (includes "Talk to Elora" option) */}
