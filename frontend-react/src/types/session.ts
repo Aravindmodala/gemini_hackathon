@@ -16,6 +16,17 @@ export interface Interaction {
   role: 'user' | 'elora' | 'tool';
   text?: string;
   name?: string;
-  args?: Record<string, any>;
+  args?: Record<string, unknown>;
   timestamp: string;
+}
+
+export interface ImageToolResult {
+  url: string;
+  caption?: string;
+}
+
+export interface MusicToolResult {
+  audio_url?: string;
+  url?: string;
+  duration?: number;
 }

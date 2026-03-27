@@ -10,6 +10,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
+import { API_BASE } from '../config/api';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -31,10 +32,6 @@ export interface StoryProposal {
 export interface UseCompanionChatOptions {
   getIdToken?: () => Promise<string>;
 }
-
-// ── Constants ──────────────────────────────────────────────────────────────────
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 // ── Proposal extraction ────────────────────────────────────────────────────────
 

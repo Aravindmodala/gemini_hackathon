@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import type { Session } from '../types/session';
+import { SIDEBAR_WIDTH } from '../config/layout';
 
 /* ── helpers ─────────────────────────────────────── */
 
@@ -323,8 +324,6 @@ export function SessionSidebar({
 }
 
 /* ── styles ──────────────────────────────────────── */
-
-const SIDEBAR_WIDTH = 300;
 
 const styles: Record<string, CSSProperties> = {
   /* Toggle button (hamburger / close) */

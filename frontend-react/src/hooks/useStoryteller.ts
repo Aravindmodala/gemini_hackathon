@@ -1,4 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { API_BASE } from '../config/api';
+import { resolveAssetUrl } from '../utils/resolveAssetUrl';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -14,8 +16,6 @@ export interface StorytellerOptions {
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export function useStoryteller(options?: StorytellerOptions) {
   const [status, setStatus] = useState<StoryStatus>('idle');
@@ -135,9 +135,7 @@ export function useStoryteller(options?: StorytellerOptions) {
               break;
 
             case 'image': {
-              const imgUrl = (event.url as string).startsWith('/')
-                ? `${API_BASE}${event.url as string}`
-                : (event.url as string);
+              const imgUrl = resolveAssetUrl(event.url as string);
               setSections(prev => [
                 ...prev,
                 { type: 'image', url: imgUrl, caption: (event.caption as string) ?? '' },
@@ -146,9 +144,7 @@ export function useStoryteller(options?: StorytellerOptions) {
             }
 
             case 'music': {
-              const musicUrl = (event.url as string).startsWith('/')
-                ? `${API_BASE}${event.url as string}`
-                : (event.url as string);
+              const musicUrl = resolveAssetUrl(event.url as string);
               setSections(prev => [
                 ...prev,
                 { type: 'music', url: musicUrl, duration: (event.duration as number) ?? 33 },
@@ -170,7 +166,7 @@ export function useStoryteller(options?: StorytellerOptions) {
       }
 
       // Stream ended without explicit done (normal on abort)
-      if (status === 'generating') setStatus('done');
+      setStatus(prev => prev === 'generating' ? 'done' : prev);
 
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') {

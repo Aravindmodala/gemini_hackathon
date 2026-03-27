@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AvatarHUD } from './components/AvatarHUD';
 import { StoryPrompt } from './components/StoryPrompt';
-import { Book3D } from './components/Book3D';
+import { StoryView } from './components/StoryView';
 import { AuthScreen } from './components/AuthScreen';
 import { SessionSidebar } from './components/SessionSidebar';
 import { EmptyState } from './components/EmptyState';
@@ -11,16 +11,11 @@ import { useAuth } from './contexts/AuthContext';
 import { useStoryteller } from './hooks/useStoryteller';
 import { useSessions } from './hooks/useSessions';
 import { useCompanionChat } from './hooks/useCompanionChat';
+import { SIDEBAR_WIDTH } from './config/layout';
+import { resolveAssetUrl } from './utils/resolveAssetUrl';
 import type { StorySection } from './hooks/useStoryteller';
-import type { Interaction } from './types/session';
+import type { Interaction, ImageToolResult, MusicToolResult } from './types/session';
 import './App.css';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
-/** Prefix relative URLs (from Firestore) with the API base so assets resolve correctly. */
-function resolveAssetUrl(url: string): string {
-  return url.startsWith('/') ? `${API_BASE}${url}` : url;
-}
 
 /* ── Loading spinner shown while Firebase resolves auth state ── */
 function LoadingScreen() {
@@ -58,7 +53,7 @@ function App() {
 
   const { sessions, loading: sessionsLoading, fetchSessions, getSessionDetail, deleteSession, renameSession } = useSessions();
 
-  const { status, sections, storyTitle, startStory, stopStory } = useStoryteller({ getIdToken });
+  const { status, sections, storyTitle, currentMusic, startStory, stopStory } = useStoryteller({ getIdToken });
 
   const {
     messages: chatMessages,
@@ -111,13 +106,13 @@ function App() {
   }, [stopStory, clearMessages]);
 
   // ── Direct story start (from StoryPrompt — fallback if user types prompt directly)
-  const handleBeginStory = (prompt: string) => {
+  const handleBeginStory = useCallback((prompt: string) => {
     setActiveSessionId(null);
     setHydratedSections([]);
     setIsConversing(false);
     void startStory(prompt);
     void fetchSessions();
-  };
+  }, [startStory, fetchSessions]);
 
   // ── Session selection ─────────────────────────────────────────────────────
   const handleSelectSession = useCallback(async (sessionId: string) => {
@@ -128,8 +123,6 @@ function App() {
 
     try {
       const detail = await getSessionDetail(sessionId);
-      console.log('[Session] loaded detail:', detail);
-      console.log('[Session] interactions:', detail.interactions);
       const nextSections: StorySection[] = [];
 
       for (const interaction of detail.interactions as Interaction[]) {
@@ -140,22 +133,21 @@ function App() {
         if (interaction.role !== 'tool') continue;
 
         const args = interaction.args ?? {};
-        const imageUrl = typeof args.url === 'string'
-          ? args.url
-          : typeof (args as Record<string, unknown>).image_url === 'string'
-            ? (args as { image_url: string }).image_url
-            : null;
-        const musicUrl = typeof (args as Record<string, unknown>).audio_url === 'string'
-          ? (args as { audio_url: string }).audio_url
-          : (interaction.name?.toLowerCase().includes('music') && typeof args.url === 'string' ? args.url : null);
+        const imgArgs = args as unknown as ImageToolResult;
+        const musArgs = args as unknown as MusicToolResult;
+
+        const imageUrl = typeof imgArgs.url === 'string'
+          ? imgArgs.url
+          : null;
+        const musicUrl = typeof musArgs.audio_url === 'string'
+          ? musArgs.audio_url
+          : (interaction.name?.toLowerCase().includes('music') && typeof musArgs.url === 'string' ? musArgs.url : null);
 
         if (imageUrl) {
           nextSections.push({
             type: 'image',
             url: resolveAssetUrl(imageUrl),
-            caption: typeof (args as Record<string, unknown>).caption === 'string'
-              ? (args as { caption: string }).caption
-              : '',
+            caption: typeof imgArgs.caption === 'string' ? imgArgs.caption : '',
           });
         }
 
@@ -163,14 +155,11 @@ function App() {
           nextSections.push({
             type: 'music',
             url: resolveAssetUrl(musicUrl),
-            duration: typeof (args as Record<string, unknown>).duration === 'number'
-              ? (args as { duration: number }).duration
-              : 33,
+            duration: typeof musArgs.duration === 'number' ? musArgs.duration : 33,
           });
         }
       }
 
-      console.log('[Session] built sections:', nextSections);
       if (nextSections.length === 0) {
         // Session exists but has no saved content (interrupted generation)
         console.warn('[Session] no content found for session:', sessionId);
@@ -196,8 +185,6 @@ function App() {
   /* ── Auth gates ─────────────────────────────────────────── */
   if (loading) return <LoadingScreen />;
   if (!user)   return <AuthScreen />;
-
-  const SIDEBAR_WIDTH = 300;
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', position: 'relative' }}>
@@ -252,15 +239,15 @@ function App() {
           visible={isConversing && !showStory}
         />
 
-        {/* 3D Book view — shown once content starts arriving */}
+        {/* Story reader — shown once content starts arriving */}
         {showStory && (
-          <Book3D
+          <StoryView
             key={activeSessionId ?? 'live'}
             sections={storySections}
             status={status}
-            onClose={handleNewStory}
+            currentMusic={currentMusic}
             title={storyTitle ?? undefined}
-            autoOpen={!!activeSessionId}
+            sidebarOffset={isSidebarOpen ? SIDEBAR_WIDTH : 0}
           />
         )}
 
@@ -277,10 +264,6 @@ function App() {
         <AvatarHUD status={status} onStop={stopStory} onNewStory={handleNewStory} />
       </div>
 
-      <style>{`
-        @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
-        @keyframes pulse-orb { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
-      `}</style>
     </div>
   );
 }

@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { API_BASE } from '../config/api';
 import type { Session, SessionDetail } from '../types/session';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export function useSessions() {
   const { getIdToken, user, loading: authLoading } = useAuth();

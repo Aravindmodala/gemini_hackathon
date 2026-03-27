@@ -4,52 +4,80 @@ description: Recurring patterns, DRY violations, and anti-patterns observed in t
 type: project
 ---
 
-Key conventions and known issues in the frontend codebase (as of 2026-03-24):
-
-**API_BASE duplication:** `import.meta.env.VITE_API_URL || 'http://localhost:3001'` is duplicated in App.tsx, useStoryteller.ts, useCompanionChat.ts, and useSessions.ts. Should be extracted to a shared config module.
-
-**Why:** Each hook/component defining its own API_BASE means a URL change requires touching 4+ files and risks drift.
-
-**How to apply:** When reviewing or touching any file that defines API_BASE locally, flag it and suggest extracting to `src/config/api.ts` or similar.
+Key conventions and known issues in the frontend codebase. Issues marked RESOLVED were fixed in the 2026-03-26 refactor.
 
 ---
 
-**SIDEBAR_WIDTH duplication:** The constant `300` (sidebar width in px) is defined independently in both App.tsx (line 190) and SessionSidebar.tsx (line 327). Margin calculation in App.tsx depends on this matching SessionSidebar's actual width — a silent contract.
+**RESOLVED — API_BASE extraction:** `src/config/api.ts` now exports `API_BASE`. useStoryteller.ts and App.tsx both import from it. HOWEVER: `useCompanionChat.ts` (line 37) and `useSessions.ts` (line 5) still define `API_BASE` locally as a raw string. Two of the four original duplicates remain.
 
-**Why:** If SessionSidebar's width changes, App.tsx's `marginLeft` will silently mis-align.
-
-**How to apply:** Flag this whenever either file is touched. Fix is to either export the constant from SessionSidebar or define it in a shared layout constants file.
+**How to apply:** When touching useSessions.ts or useCompanionChat.ts, update them to import from `src/config/api.ts`.
 
 ---
 
-**keyframe animation triplicate:** `@keyframes pulse-orb` and `@keyframes blink` are each defined in three places: App.css, AvatarHUD.tsx (inline `<style>`), and App.tsx (inline `<style>`). This causes redundant DOM injections and maintenance divergence.
+**RESOLVED — SIDEBAR_WIDTH extraction:** `src/config/layout.ts` now exports `SIDEBAR_WIDTH = 300`. App.tsx imports it. HOWEVER: `SessionSidebar.tsx` (line 327) still defines its own local `const SIDEBAR_WIDTH = 300`. The silent contract between the two files still exists.
 
-**How to apply:** Suggest consolidating all keyframes into App.css and removing the inline `<style>` blocks from App.tsx and AvatarHUD.tsx.
-
----
-
-**VoiceButton dead duplicate in Book3D/index.tsx:** A local `VoiceButton` function is defined in Book3D/index.tsx that renders a stub (no onClick, no state) while a full, functional `VoiceButton` component already exists at `components/VoiceButton.tsx`. The local stub is essentially a non-functional placeholder that ignores the existing implementation.
-
-**How to apply:** When reviewing Book3D/index.tsx, flag the local VoiceButton as a dead stub and recommend replacing it with the existing VoiceButton component (once narration is wired up).
+**How to apply:** When touching SessionSidebar.tsx, replace local SIDEBAR_WIDTH with import from `src/config/layout.ts`.
 
 ---
 
-**handleBeginStory not memoized:** In App.tsx, `handleBeginStory` at line 114 is defined as a plain function (not `useCallback`), unlike every other handler in the same file. This is inconsistent and causes StoryPrompt to re-render on every App render cycle since the prop reference changes.
-
-**How to apply:** Add `useCallback` to `handleBeginStory` with dependencies `[startStory, fetchSessions]`.
+**RESOLVED — resolveAssetUrl extraction:** `src/utils/resolveAssetUrl.ts` is now the single definition. App.tsx and useStoryteller.ts both import it correctly. No duplication remains in the reviewed files.
 
 ---
 
-**Session hydration type safety:** In App.tsx `handleSelectSession`, `interaction.args` is cast repeatedly via `(args as Record<string, unknown>).someField` with nested ternaries across ~20 lines. The `Interaction` type in types/session.ts already types `args` as `Record<string, any>`, so the double-casting is redundant noise. The real issue is that the tool response schema (what fields an image vs music tool returns) is not typed — it's sniffed at runtime with multiple fallbacks.
-
-**How to apply:** Suggest creating typed tool result interfaces (ImageToolResult, MusicToolResult) in types/session.ts and a discriminated union or parse function to normalize them, reducing the hydration logic to a clean switch.
+**RESOLVED — handleBeginStory memoized:** `handleBeginStory` in App.tsx is now wrapped in `useCallback` with deps `[startStory, fetchSessions]`. Confirmed fixed.
 
 ---
 
-**clearTimer not stable in useBookState:** `clearTimer` at line 14 of useBookState.ts is defined as a plain function inside the hook body (not useCallback), so it gets recreated every render. All four `useCallback` hooks in the file close over it — but since it only uses the ref (not state), this is harmless in practice but technically impure. Low priority.
+**RESOLVED — stale closure in useStoryteller:** The post-stream `setStatus` now uses the functional updater form: `setStatus(prev => prev === 'generating' ? 'done' : prev)`. Confirmed fixed at line 169.
 
 ---
 
-**setTimeout without clearTimeout in Book3D handleClose:** The `handleClose` callback in Book3D/index.tsx calls `setTimeout(onClose, 1300)` but never stores the timer ID, so it cannot be cancelled if the component unmounts before the timeout fires, potentially calling `onClose` on an unmounted tree.
+**RESOLVED — StoryView sidebarOffset prop:** StoryView now accepts `sidebarOffset?: number` and applies `left: sidebarOffset ?? 0` to its container style. App.tsx passes `sidebarOffset={isSidebarOpen ? SIDEBAR_WIDTH : 0}`. Confirmed fixed.
 
-**How to apply:** Store the timeout ID in a ref and clear it in a useEffect cleanup.
+---
+
+**RESOLVED — StoryView Google Fonts inline style:** The `@import` for Playfair Display is removed from StoryView's inline `<style>`. It is now served via `<link>` in `index.html`. Confirmed fixed.
+
+---
+
+**RESOLVED — EmptyState no-op hooks and empty interface:** The no-op `useEffect`, `useRef`, and empty `EmptyStateProps` interface have been removed. EmptyState.tsx is now a clean, props-free functional component.
+
+---
+
+**RESOLVED — types/session.ts improvements:** `args` type changed from `Record<string, any>` to `Record<string, unknown>`. `ImageToolResult` and `MusicToolResult` interfaces added. The double-casting in App.tsx `handleSelectSession` is now backed by these types.
+
+---
+
+**RESOLVED — console.log removed from App.tsx:** No `console.log` calls remain. Only `console.warn` and `console.error` are present. Confirmed.
+
+---
+
+**PARTIAL — Inline keyframe in App.tsx:** The large inline `<style>` block with duplicate keyframes was removed from App.tsx. HOWEVER: App.tsx still contains a `<style>` tag inside `LoadingScreen` at line 26 for `@keyframes authSpinner`. This keyframe is unique (not in App.css) so it is a legitimate inline style, not a duplicate. Not a bug.
+
+---
+
+**REMAINING — keyframe animation triplicate in AvatarHUD.tsx:** `@keyframes pulse-orb` and `@keyframes blink` may still be defined inside an inline `<style>` in AvatarHUD.tsx. Verify against App.css — this file was NOT in scope for the 2026-03-26 fix batch.
+
+---
+
+**REMAINING — API_BASE still local in useCompanionChat.ts and useSessions.ts:** Both files define `const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001'` locally instead of importing from `src/config/api.ts`.
+
+---
+
+**REMAINING — SIDEBAR_WIDTH still local in SessionSidebar.tsx:** Line 327 still has `const SIDEBAR_WIDTH = 300;` — should import from `src/config/layout.ts`.
+
+---
+
+**REMAINING — VoiceButton dead duplicate in Book3D/index.tsx:** A local `VoiceButton` function is defined in Book3D/index.tsx that renders a stub (no onClick, no state) while a full, functional `VoiceButton` component already exists at `components/VoiceButton.tsx`.
+
+---
+
+**REMAINING — setTimeout without clearTimeout in Book3D handleClose:** The `handleClose` callback calls `setTimeout(onClose, 1300)` but never stores the timer ID, so it cannot be cancelled if the component unmounts before the timeout fires.
+
+---
+
+**REMAINING — handleSignOut not memoized in App.tsx:** Still defined as a plain arrow function at line 176, not useCallback. Low impact but inconsistent with the rest of the file.
+
+---
+
+**REMAINING — index.html Google Fonts link is incomplete:** `index.html` now loads `Playfair Display` and `Cinzel` via `<link>` (correct). However, `App.css` line 7 still has a duplicate `@import url(...)` for `Cinzel` and `Inter` from Google Fonts. Both the HTML `<link>` and the CSS `@import` will fire, resulting in two separate HTTP requests for font data on page load. The CSS `@import` in App.css should be removed in favor of the HTML link, OR the HTML link should be extended to also include Inter (currently missing from the `<link>` tag).
