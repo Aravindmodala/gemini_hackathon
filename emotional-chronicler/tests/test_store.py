@@ -324,16 +324,16 @@ class TestGetPreviousContext:
         assert result is None
 
 
-# ── Static methods: list_sessions ─────────────────────────────
+# ── SessionQueryService: list_sessions ─────────────────────────
 
 class TestListSessions:
-    """Tests for SessionStore.list_sessions()."""
+    """Tests for SessionQueryService.list_sessions()."""
 
     def test_list_sessions_returns_formatted_session_list(self):
         """Returns list of session dicts with expected fields."""
         now = datetime.now(timezone.utc)
 
-        with patch("app.core.store._get_db") as mock_get_db:
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
             mock_db = MagicMock()
             mock_get_db.return_value = mock_db
 
@@ -354,8 +354,8 @@ class TestListSessions:
             }
             mock_query.limit.return_value.stream.return_value = [mock_doc]
 
-            from app.core.store import SessionStore
-            sessions, next_cursor = SessionStore.list_sessions("test-user-123")
+            from app.core.session_query_service import SessionQueryService
+            sessions, next_cursor = SessionQueryService.list_sessions("test-user-123")
 
             assert len(sessions) == 1
             assert sessions[0]["session_id"] == "session-abc"
@@ -366,27 +366,27 @@ class TestListSessions:
             assert next_cursor is None
 
     def test_list_sessions_with_no_db_returns_empty_list(self):
-        """No Firestore → returns ([], None) tuple."""
-        with patch("app.core.store._get_db") as mock_get_db:
+        """No Firestore -> returns ([], None) tuple."""
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
             mock_get_db.return_value = None
 
-            from app.core.store import SessionStore
-            sessions, next_cursor = SessionStore.list_sessions("test-user-123")
+            from app.core.session_query_service import SessionQueryService
+            sessions, next_cursor = SessionQueryService.list_sessions("test-user-123")
 
             assert sessions == []
             assert next_cursor is None
 
 
-# ── Static methods: get_session ───────────────────────────────
+# ── SessionQueryService: get_session ───────────────────────────
 
 class TestGetSession:
-    """Tests for SessionStore.get_session()."""
+    """Tests for SessionQueryService.get_session()."""
 
     def test_get_session_returns_session_data(self):
-        """Existing session → returns session dict with interactions."""
+        """Existing session -> returns session dict with interactions."""
         now = datetime.now(timezone.utc)
 
-        with patch("app.core.store._get_db") as mock_get_db:
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
             mock_db = MagicMock()
             mock_get_db.return_value = mock_db
 
@@ -405,8 +405,8 @@ class TestGetSession:
             }
             mock_doc_ref.get.return_value = mock_doc
 
-            from app.core.store import SessionStore
-            result = SessionStore.get_session("test-user-123", "session-xyz")
+            from app.core.session_query_service import SessionQueryService
+            result = SessionQueryService.get_session("test-user-123", "session-xyz")
 
             assert result is not None
             assert result["session_id"] == "session-xyz"
@@ -414,8 +414,8 @@ class TestGetSession:
             assert len(result["interactions"]) == 1
 
     def test_get_session_with_nonexistent_session_returns_none(self):
-        """Non-existent session → returns None."""
-        with patch("app.core.store._get_db") as mock_get_db:
+        """Non-existent session -> returns None."""
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
             mock_db = MagicMock()
             mock_get_db.return_value = mock_db
 
@@ -426,69 +426,69 @@ class TestGetSession:
             mock_doc.exists = False
             mock_doc_ref.get.return_value = mock_doc
 
-            from app.core.store import SessionStore
-            result = SessionStore.get_session("test-user-123", "nonexistent")
+            from app.core.session_query_service import SessionQueryService
+            result = SessionQueryService.get_session("test-user-123", "nonexistent")
 
             assert result is None
 
     def test_get_session_with_no_db_returns_none(self):
-        """No Firestore → returns None."""
-        with patch("app.core.store._get_db") as mock_get_db:
+        """No Firestore -> returns None."""
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
             mock_get_db.return_value = None
 
-            from app.core.store import SessionStore
-            result = SessionStore.get_session("test-user-123", "any-id")
+            from app.core.session_query_service import SessionQueryService
+            result = SessionQueryService.get_session("test-user-123", "any-id")
 
             assert result is None
 
 
-# ── Static methods: delete_session ────────────────────────────
+# ── SessionQueryService: delete_session ────────────────────────
 
 class TestDeleteSession:
-    """Tests for SessionStore.delete_session()."""
+    """Tests for SessionQueryService.delete_session()."""
 
     def test_delete_session_deletes_document(self):
-        """Successful delete → returns True."""
-        with patch("app.core.store._get_db") as mock_get_db:
+        """Successful delete -> returns True."""
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
             mock_db = MagicMock()
             mock_get_db.return_value = mock_db
 
             mock_doc_ref = MagicMock()
             mock_db.collection.return_value.document.return_value.collection.return_value.document.return_value = mock_doc_ref
 
-            from app.core.store import SessionStore
-            result = SessionStore.delete_session("test-user-123", "session-abc")
+            from app.core.session_query_service import SessionQueryService
+            result = SessionQueryService.delete_session("test-user-123", "session-abc")
 
             assert result is True
             mock_doc_ref.delete.assert_called_once()
 
     def test_delete_session_with_no_db_returns_false(self):
-        """No Firestore → returns False."""
-        with patch("app.core.store._get_db") as mock_get_db:
+        """No Firestore -> returns False."""
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
             mock_get_db.return_value = None
 
-            from app.core.store import SessionStore
-            result = SessionStore.delete_session("test-user-123", "any-id")
+            from app.core.session_query_service import SessionQueryService
+            result = SessionQueryService.delete_session("test-user-123", "any-id")
 
             assert result is False
 
 
-# ── Static methods: update_session_title ──────────────────────
+# ── SessionQueryService: update_session_title ──────────────────
 
 class TestUpdateSessionTitle:
-    """Tests for SessionStore.update_session_title()."""
+    """Tests for SessionQueryService.update_session_title()."""
 
     def test_update_session_title_updates_title(self):
-        """Successful update → returns True."""
-        with patch("app.core.store._get_db") as mock_get_db:
+        """Successful update -> returns True."""
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
             mock_db = MagicMock()
             mock_get_db.return_value = mock_db
 
             mock_doc_ref = MagicMock()
             mock_db.collection.return_value.document.return_value.collection.return_value.document.return_value = mock_doc_ref
 
-            from app.core.store import SessionStore
-            result = SessionStore.update_session_title(
+            from app.core.session_query_service import SessionQueryService
+            result = SessionQueryService.update_session_title(
                 "test-user-123", "session-abc", "New Title"
             )
 
@@ -498,12 +498,12 @@ class TestUpdateSessionTitle:
             assert call_args["title"] == "New Title"
 
     def test_update_session_title_with_no_db_returns_false(self):
-        """No Firestore → returns False."""
-        with patch("app.core.store._get_db") as mock_get_db:
+        """No Firestore -> returns False."""
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
             mock_get_db.return_value = None
 
-            from app.core.store import SessionStore
-            result = SessionStore.update_session_title(
+            from app.core.session_query_service import SessionQueryService
+            result = SessionQueryService.update_session_title(
                 "test-user-123", "any-id", "Title"
             )
 

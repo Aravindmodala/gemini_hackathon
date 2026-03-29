@@ -59,7 +59,7 @@ class TestGetCurrentUser:
                 await get_current_user(request)
 
             assert exc_info.value.status_code == 401
-            assert "Invalid Firebase ID token" in exc_info.value.detail
+            assert exc_info.value.detail == "Authentication failed"
 
     @pytest.mark.asyncio
     async def test_get_current_user_with_malformed_header_no_bearer_raises_401(self):
@@ -128,31 +128,3 @@ class TestGetOptionalUser:
                 await get_optional_user(request)
 
             assert exc_info.value.status_code == 401
-
-
-# ── verify_ws_token ───────────────────────────────────────────
-
-class TestVerifyWsToken:
-    """Tests for verify_ws_token()."""
-
-    def test_verify_ws_token_with_valid_token_returns_user_dict(self):
-        """Valid token → returns decoded dict."""
-        decoded = {"uid": "ws-user-456", "email": "ws@example.com"}
-
-        with patch("app.server.auth_middleware.verify_id_token") as mock_verify:
-            mock_verify.return_value = decoded
-
-            from app.server.auth_middleware import verify_ws_token
-            result = verify_ws_token("valid-ws-token")
-
-            assert result == decoded
-            mock_verify.assert_called_once_with("valid-ws-token")
-
-    def test_verify_ws_token_with_invalid_token_raises_value_error(self):
-        """Invalid token → raises ValueError."""
-        with patch("app.server.auth_middleware.verify_id_token") as mock_verify:
-            mock_verify.side_effect = ValueError("Invalid token")
-
-            from app.server.auth_middleware import verify_ws_token
-            with pytest.raises(ValueError, match="Invalid token"):
-                verify_ws_token("bad-ws-token")

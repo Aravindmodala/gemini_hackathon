@@ -39,6 +39,47 @@ def _safe_iso(val) -> str | None:
         return str(val)
 
 
+def _session_doc_ref(db, user_id: str, session_id: str):
+    """Build a Firestore document reference for a session."""
+    return (
+        db.collection("sessions")
+        .document(user_id)
+        .collection("conversations")
+        .document(session_id)
+    )
+
+
+def _format_interaction_lines(
+    interactions: list[dict],
+    limit: int | None,
+    formatter,
+) -> str | None:
+    """Format interaction entries into a narrative string.
+
+    Args:
+        interactions: List of interaction dicts with 'role' and 'text' keys.
+        limit: Max number of interactions to include (None = all).
+        formatter: Function that takes a single interaction dict and returns
+                   a formatted string, or None to skip that entry.
+
+    Returns:
+        Joined formatted string, or None if no interactions produce output.
+    """
+    if not interactions:
+        return None
+
+    if limit:
+        interactions = interactions[-limit:]
+
+    lines = []
+    for entry in interactions:
+        line = formatter(entry)
+        if line:
+            lines.append(line)
+
+    return "\n".join(lines) if lines else None
+
+
 def _get_preview(interactions: list) -> str:
     """Get a short preview from the last meaningful interaction."""
     for entry in reversed(interactions):
@@ -83,12 +124,7 @@ class SessionStore:
         now = datetime.now(timezone.utc)
 
         try:
-            self._doc_ref = (
-                self._db.collection("sessions")
-                .document(self.user_id)
-                .collection("conversations")
-                .document(self.session_id)
-            )
+            self._doc_ref = _session_doc_ref(self._db, self.user_id, self.session_id)
 
             self._doc_ref.set({
                 "created_at": now,
@@ -233,14 +269,19 @@ class SessionStore:
 
             # Conversation history
             if interactions:
-                lines.append("COMPANION CONVERSATION:")
-                for entry in interactions[-30:]:
+                def _companion_fmt(entry):
                     role = entry.get("role", "")
                     text = entry.get("text", "")
                     if role == "user" and text:
-                        lines.append(f'  Traveler: "{text}"')
+                        return f'  Traveler: "{text}"'
                     elif role == "elora" and text:
-                        lines.append(f'  Elora: "{text}"')
+                        return f'  Elora: "{text}"'
+                    return None
+
+                conversation = _format_interaction_lines(interactions, 30, _companion_fmt)
+                if conversation:
+                    lines.append("COMPANION CONVERSATION:")
+                    lines.append(conversation)
 
             if not lines:
                 return None
@@ -263,6 +304,82 @@ class SessionStore:
         except Exception as e:
             logger.warning("[Store] Failed to load companion context: %s", e)
             return None
+
+    def get_companion_data(self) -> tuple[str | None, str | None, str | None]:
+        """Returns (context_str, proposed_title, proposed_brief) in one Firestore fetch."""
+        if not self._doc_ref:
+            return None, None, None
+
+        try:
+            doc = self._doc_ref.get()
+            if not doc.exists:
+                return None, None, None
+
+            data = doc.to_dict()
+            interactions = data.get("interactions", [])
+            proposal = data.get("companion_proposal", {})
+
+            if not interactions and not proposal:
+                return None, None, None
+
+            # ── Build context string (same logic as get_companion_context) ──
+            lines = []
+
+            if proposal:
+                lines.append(f"STORY TITLE: {proposal.get('title', 'Untitled')}")
+                lines.append(f"STORY BRIEF: {proposal.get('brief', '')}")
+                emotions = proposal.get("emotions", [])
+                if emotions:
+                    lines.append(f"TRAVELER'S EMOTIONS: {', '.join(emotions)}")
+                genre = proposal.get("genre", "")
+                if genre:
+                    lines.append(f"GENRE: {genre}")
+                tone = proposal.get("tone", "")
+                if tone:
+                    lines.append(f"TONE: {tone}")
+                lines.append("")
+
+            if interactions:
+                def _companion_fmt(entry):
+                    role = entry.get("role", "")
+                    text = entry.get("text", "")
+                    if role == "user" and text:
+                        return f'  Traveler: "{text}"'
+                    elif role == "elora" and text:
+                        return f'  Elora: "{text}"'
+                    return None
+
+                conversation = _format_interaction_lines(interactions, 30, _companion_fmt)
+                if conversation:
+                    lines.append("COMPANION CONVERSATION:")
+                    lines.append(conversation)
+
+            context_str = None
+            if lines:
+                context = "\n".join(lines)
+                context_str = (
+                    "\n\n═══════════════════════════════════════════════════════════════\n"
+                    "COMPANION CONTEXT — THE TRAVELER'S EMOTIONAL STATE\n"
+                    "═══════════════════════════════════════════════════════════════\n\n"
+                    "Before this story begins, you (Elora) had a conversation with this "
+                    "traveler to understand their mood and what kind of story they need. "
+                    "Here is what you learned:\n\n"
+                    f"{context}\n\n"
+                    "Use this context to shape every aspect of the story — its tone, "
+                    "themes, emotional arc, and imagery. The traveler chose this story "
+                    "because it resonates with how they feel right now. Honor that.\n"
+                    "═══════════════════════════════════════════════════════════════"
+                )
+
+            # ── Extract proposal title and brief ──
+            proposed_title = proposal.get("title") or None if proposal else None
+            proposed_brief = proposal.get("brief", "") if proposal else None
+
+            return context_str, proposed_title, proposed_brief
+
+        except Exception as e:
+            logger.warning("[Store] Failed to load companion data: %s", e)
+            return None, None, None
 
     def get_companion_title(self) -> tuple[str, str] | tuple[None, None]:
         """Return (title, brief) from the companion proposal, or (None, None) if unavailable."""
@@ -296,12 +413,7 @@ class SessionStore:
         if not self._db or not self.session_id:
             return
         try:
-            self._doc_ref = (
-                self._db.collection("sessions")
-                .document(self.user_id)
-                .collection("conversations")
-                .document(self.session_id)
-            )
+            self._doc_ref = _session_doc_ref(self._db, self.user_id, self.session_id)
         except Exception as e:
             logger.warning("[Store] Failed to init doc ref: %s", e)
             self._doc_ref = None
@@ -335,24 +447,22 @@ class SessionStore:
             if not interactions:
                 return None
 
-            # Format same as get_previous_context but for current session
-            lines = []
-            for entry in interactions[-30:]:  # Last 30 interactions
+            def _session_fmt(entry):
                 role = entry.get("role", "")
                 if role == "user":
-                    lines.append(f'The traveler said: "{entry.get("text", "")}"')
+                    return f'The traveler said: "{entry.get("text", "")}"'
                 elif role == "elora":
-                    lines.append(f'You (ELORA) narrated: "{entry.get("text", "")}"')
+                    return f'You (ELORA) narrated: "{entry.get("text", "")}"'
                 elif role == "tool":
                     tool_name = entry.get("name", "unknown")
                     if tool_name == "generate_music":
                         prompt = entry.get("args", {}).get("prompt", "")
-                        lines.append(f'You scored the scene with music: "{prompt}"')
-
-            if not lines:
+                        return f'You scored the scene with music: "{prompt}"'
                 return None
 
-            context = "\n".join(lines)
+            context = _format_interaction_lines(interactions, 30, _session_fmt)
+            if not context:
+                return None
             return (
                 f"\n\n═══════════════════════════════════════════════════════════════\n"
                 f"MEMORY — CONTINUING YOUR STORY WITH THIS TRAVELER\n"
@@ -403,24 +513,22 @@ class SessionStore:
             if not interactions:
                 return None
 
-            # Build a narrative summary of the previous session
-            lines = []
-            for entry in interactions[-20:]:  # Last 20 interactions max
+            def _previous_fmt(entry):
                 role = entry.get("role", "")
                 if role == "user":
-                    lines.append(f"The traveler said: \"{entry.get('text', '')}\"")
+                    return f"The traveler said: \"{entry.get('text', '')}\""
                 elif role == "elora":
-                    lines.append(f"You (ELORA) narrated: \"{entry.get('text', '')}\"")
+                    return f"You (ELORA) narrated: \"{entry.get('text', '')}\""
                 elif role == "tool":
                     tool_name = entry.get("name", "unknown")
                     if tool_name == "generate_music":
                         prompt = entry.get("args", {}).get("prompt", "")
-                        lines.append(f"You scored the scene with music: \"{prompt}\"")
-
-            if not lines:
+                        return f"You scored the scene with music: \"{prompt}\""
                 return None
 
-            context = "\n".join(lines)
+            context = _format_interaction_lines(interactions, 20, _previous_fmt)
+            if not context:
+                return None
             return (
                 f"\n\n═══════════════════════════════════════════════════════════════\n"
                 f"MEMORY — YOUR PREVIOUS SESSION WITH THIS TRAVELER\n"
@@ -437,129 +545,3 @@ class SessionStore:
             logger.warning("[Store] Failed to load previous context: %s", e)
             return None
 
-    # ── Static query methods (for REST API) ───────────────────
-
-    @staticmethod
-    def list_sessions(user_id: str, limit: int = 20, cursor: str | None = None) -> tuple:
-        """List sessions for a user with cursor-based pagination.
-
-        Args:
-            user_id: The Firebase UID of the user.
-            limit: Maximum number of sessions to return (1–100).
-            cursor: Opaque cursor — the session_id of the last item from the previous page.
-
-        Returns:
-            A (sessions, next_cursor) tuple. next_cursor is None when no more pages exist.
-        """
-        db = _get_db()
-        if not db:
-            return [], None
-        try:
-            conversations_ref = (
-                db.collection("sessions")
-                .document(user_id)
-                .collection("conversations")
-            )
-            query = conversations_ref.order_by(
-                "updated_at", direction=firestore.Query.DESCENDING
-            )
-
-            # Apply cursor if provided
-            if cursor:
-                cursor_doc = conversations_ref.document(cursor).get()
-                if cursor_doc.exists:
-                    query = query.start_after(cursor_doc)
-
-            # Fetch limit+1 to detect whether a next page exists
-            docs = list(query.limit(limit + 1).stream())
-
-            has_next = len(docs) > limit
-            page_docs = docs[:limit]
-
-            sessions = []
-            for doc in page_docs:
-                data = doc.to_dict()
-                sessions.append({
-                    "session_id": doc.id,
-                    "title": data.get("title", "Untitled Story"),
-                    "status": data.get("status", "unknown"),
-                    "created_at": _safe_iso(data.get("created_at")),
-                    "updated_at": _safe_iso(data.get("updated_at")),
-                    "interaction_count": len(data.get("interactions", [])),
-                    "preview": _get_preview(data.get("interactions", [])),
-                })
-
-            next_cursor = page_docs[-1].id if has_next and page_docs else None
-            return sessions, next_cursor
-
-        except Exception as e:
-            logger.warning("[Store] Failed to list sessions: %s", e)
-            return [], None
-
-    @staticmethod
-    def get_session(user_id: str, session_id: str) -> dict | None:
-        """Get a single session with all interactions."""
-        db = _get_db()
-        if not db:
-            return None
-        try:
-            doc_ref = (
-                db.collection("sessions")
-                .document(user_id)
-                .collection("conversations")
-                .document(session_id)
-            )
-            doc = doc_ref.get()
-            if not doc.exists:
-                return None
-            data = doc.to_dict()
-            return {
-                "session_id": doc.id,
-                "title": data.get("title", "Untitled Story"),
-                "status": data.get("status", "unknown"),
-                "created_at": _safe_iso(data.get("created_at")),
-                "updated_at": _safe_iso(data.get("updated_at")),
-                "interactions": data.get("interactions", []),
-            }
-        except Exception as e:
-            logger.warning("[Store] Failed to get session: %s", e)
-            return None
-
-    @staticmethod
-    def delete_session(user_id: str, session_id: str) -> bool:
-        """Delete a session document."""
-        db = _get_db()
-        if not db:
-            return False
-        try:
-            doc_ref = (
-                db.collection("sessions")
-                .document(user_id)
-                .collection("conversations")
-                .document(session_id)
-            )
-            doc_ref.delete()
-            logger.info("[Store] Session deleted: %s/%s", user_id, session_id)
-            return True
-        except Exception as e:
-            logger.warning("[Store] Failed to delete session: %s", e)
-            return False
-
-    @staticmethod
-    def update_session_title(user_id: str, session_id: str, title: str) -> bool:
-        """Update a session's title."""
-        db = _get_db()
-        if not db:
-            return False
-        try:
-            doc_ref = (
-                db.collection("sessions")
-                .document(user_id)
-                .collection("conversations")
-                .document(session_id)
-            )
-            doc_ref.update({"title": title, "updated_at": datetime.now(timezone.utc)})
-            return True
-        except Exception as e:
-            logger.warning("[Store] Failed to update title: %s", e)
-            return False

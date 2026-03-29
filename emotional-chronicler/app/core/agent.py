@@ -72,5 +72,5 @@ companion_runner = Runner(
     session_service=_session_service,
 )
 
-logger.info(f"[Agent] Elora story agent ready — model: {STORY_MODEL}")
-logger.info(f"[Agent] Elora companion ready — model: {COMPANION_MODEL}")
+logger.info("[Agent] Elora story agent ready — model: %s", STORY_MODEL)
+logger.info("[Agent] Elora companion ready — model: %s", COMPANION_MODEL)

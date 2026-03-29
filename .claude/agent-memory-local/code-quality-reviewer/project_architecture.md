@@ -22,4 +22,11 @@ Key conventions:
 - Return type of `get_companion_title()` is `tuple[str, str] | tuple[None, None]` but actual return can be `tuple[None, str]` — annotation is narrower than reality (correct annotation: `tuple[str | None, str | None]`)
 - `get_companion_context` (store.py ~194) and `get_session_context` (~319) share nearly identical interaction-formatting logic — DRY violation, candidate for a `_format_interactions(interactions, limit)` helper
 - Missing PEP 8 blank line between `get_companion_context` and `get_companion_title` method definitions (store.py line 265–266)
-- Three previously flagged critical issues (store_ref UnboundLocalError, blocking Firestore in async, private _doc_ref access) were all correctly fixed in the 2026-03 fix pass
+- `elora_text_buffer` (routes.py line 137) is now correctly declared before `try:` — the UnboundLocalError bug from prior notes is FIXED
+- `chat_routes.py` has NOT been updated to use asyncio.to_thread() for Firestore calls: lines 81, 85, 102 (in outer async handler), and lines 148-160 (inside event_stream generator) all call synchronous Firestore methods directly — this blocks the event loop and is the one remaining critical async correctness bug
+- `_sse()` is still duplicated: identical implementation in routes.py (line 308) and chat_routes.py (line 200–201) — should live in a shared app/server/sse.py
+- `BaseTool` / `ToolRegistry` / `GoogleSearchTool` in tools/ are confirmed dead code — never used by the ADK path; the registry is imported as a singleton but nothing in any route or agent calls `tool_registry`
+- `verify_ws_token` in auth_middleware.py is dead code — no WebSocket routes exist; leftover from old architecture
+- COMPANION_MODEL default in config.py is "gemini-3-flash-preview" (line 38) but docstring in agent.py says "Gemini 2.0 Flash" — model name inconsistency worth flagging
+- `load_dotenv()` is called twice: once in main.py (line 7) and once at module level in config.py (line 15); the second call is a no-op but creates confusion
+- Three previously flagged critical issues (store_ref UnboundLocalError, blocking Firestore in async in routes.py, private _doc_ref access) were all correctly fixed in the 2026-03 fix pass

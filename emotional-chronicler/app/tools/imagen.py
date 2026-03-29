@@ -45,7 +45,7 @@ async def generate_image(
     """
     try:
         full_prompt = f"{scene_description}. Style: {style}"
-        logger.info(f"[Imagen] Generating: '{scene_description[:80]}...'")
+        logger.info("[Imagen] Generating: '%.80s...'", scene_description)
 
         response = get_genai_client().models.generate_images(
             model=IMAGEN_MODEL,
@@ -67,7 +67,7 @@ async def generate_image(
         filepath = IMAGE_CACHE_DIR / filename
         filepath.write_bytes(image_bytes)
 
-        logger.info(f"[Imagen] ✅ Saved {filename} ({len(image_bytes):,} bytes)")
+        logger.info("[Imagen] Saved %s (%s bytes)", filename, f"{len(image_bytes):,}")
 
         return {
             "image_url": f"/api/images/{filename}",
@@ -75,5 +75,5 @@ async def generate_image(
         }
 
     except Exception as e:
-        logger.error(f"[Imagen] ❌ Failed: {e}")
+        logger.error("[Imagen] Failed: %s", e)
         return {"error": str(e)}

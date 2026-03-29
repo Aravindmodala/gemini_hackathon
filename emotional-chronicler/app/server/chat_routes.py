@@ -15,19 +15,21 @@ SSE event format:
   {"type": "error", "message": "..."}  — generation failure
 """
 
+import asyncio
 import json
 import logging
-import uuid
-from typing import Optional
+import re
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from google.genai import types as genai_types
 from pydantic import BaseModel, field_validator
 
+from app.core.adk_session_manager import ADKSessionManager
 from app.core.agent import companion_runner, APP_NAME
-from app.core.store import SessionStore
 from app.server.auth_middleware import get_optional_user
+from app.server.session_resolver import SessionResolver
+from app.server.sse import format_sse_event
 
 logger = logging.getLogger("chronicler")
 
@@ -38,7 +40,7 @@ chat_router = APIRouter()
 
 class CompanionRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None
+    session_id: str | None = None
 
     @field_validator("message")
     @classmethod
@@ -72,23 +74,13 @@ async def companion_chat(request: CompanionRequest, http_request: Request):
     Firestore so the story agent can load them later.
     """
     auth_user = await get_optional_user(http_request)
-    is_authenticated = bool(auth_user)
 
-    if is_authenticated:
-        user_id = auth_user["uid"]
-        store = SessionStore(user_id)
-        if request.session_id:
-            resumed = store.resume_session(request.session_id)
-            if resumed:
-                session_id = request.session_id
-            else:
-                session_id = store.create_session("Companion Chat")
-        else:
-            session_id = store.create_session("Companion Chat")
-    else:
-        user_id = "anonymous"
-        session_id = request.session_id or uuid.uuid4().hex
-        store = None
+    resolver = SessionResolver()
+    user_id, session_id, store = await resolver.resolve(
+        auth_user=auth_user,
+        requested_session_id=request.session_id,
+        session_title="Companion Chat",
+    )
 
     logger.info(
         "[Companion] request_received user_id=%s session_id=%s msg_len=%d",
@@ -99,30 +91,16 @@ async def companion_chat(request: CompanionRequest, http_request: Request):
 
     # Log user interaction to Firestore
     if store:
-        store.log_interaction("user", request.message)
+        await asyncio.to_thread(store.log_interaction, "user", request.message)
 
     async def event_stream():
         try:
             # Emit session id so the frontend can track it
-            yield _sse({"type": "session", "session_id": session_id})
+            yield format_sse_event({"type": "session", "session_id": session_id})
 
             # Ensure the ADK session exists
-            existing = await companion_runner.session_service.get_session(
-                app_name=APP_NAME,
-                user_id=user_id,
-                session_id=session_id,
-            )
-            if not existing:
-                logger.info(
-                    "[Companion] creating new session user_id=%s session_id=%s",
-                    user_id,
-                    session_id,
-                )
-                await companion_runner.session_service.create_session(
-                    app_name=APP_NAME,
-                    user_id=user_id,
-                    session_id=session_id,
-                )
+            adk_manager = ADKSessionManager(companion_runner, APP_NAME)
+            await adk_manager.ensure_session_exists(user_id, session_id)
 
             new_message = genai_types.Content(
                 role="user",
@@ -142,16 +120,17 @@ async def companion_chat(request: CompanionRequest, http_request: Request):
                 for part in event.content.parts:
                     if part.text:
                         full_response += part.text
-                        yield _sse({"type": "text", "chunk": part.text})
+                        yield format_sse_event({"type": "text", "chunk": part.text})
 
             # Log Elora's response to Firestore
             if store and full_response.strip():
-                store.log_interaction("elora", full_response)
+                await asyncio.to_thread(store.log_interaction, "elora", full_response)
 
                 # Check if response contains a story proposal
                 proposal = _extract_proposal(full_response)
                 if proposal:
-                    store.log_companion_proposal(
+                    await asyncio.to_thread(
+                        store.log_companion_proposal,
                         title=proposal.get("title", ""),
                         brief=proposal.get("brief", ""),
                         emotions=proposal.get("emotions", []),
@@ -160,7 +139,7 @@ async def companion_chat(request: CompanionRequest, http_request: Request):
                     )
 
             logger.info("[Companion] stream_complete user_id=%s session_id=%s", user_id, session_id)
-            yield _sse({"type": "done"})
+            yield format_sse_event({"type": "done"})
 
         except Exception as e:
             logger.exception(
@@ -169,7 +148,7 @@ async def companion_chat(request: CompanionRequest, http_request: Request):
                 session_id,
                 e,
             )
-            yield _sse({"type": "error", "message": "Failed to get a response. Please try again."})
+            yield format_sse_event({"type": "error", "message": "Failed to get a response. Please try again."})
 
     return StreamingResponse(
         event_stream(),
@@ -186,7 +165,6 @@ def _extract_proposal(text: str) -> dict | None:
 
     The prompt instructs Elora to wrap proposals in ```story_proposal ... ``` blocks.
     """
-    import re
     match = re.search(r"```story_proposal\s*\n(.*?)\n```", text, re.DOTALL)
     if not match:
         return None
@@ -197,5 +175,3 @@ def _extract_proposal(text: str) -> dict | None:
         return None
 
 
-def _sse(payload: dict) -> str:
-    return f"data: {json.dumps(payload)}\n\n"

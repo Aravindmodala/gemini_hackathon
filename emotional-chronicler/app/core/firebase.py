@@ -6,7 +6,6 @@ Follows the same graceful-degradation pattern as store.py.
 """
 
 import logging
-from typing import Optional
 
 import firebase_admin
 from firebase_admin import auth as firebase_auth
@@ -17,11 +16,11 @@ from app.config import FIREBASE_ENABLED
 logger = logging.getLogger("chronicler")
 
 # ── Singleton state ──────────────────────────────────────────
-_firebase_app: Optional[firebase_admin.App] = None
+_firebase_app: firebase_admin.App | None = None
 _firebase_available: bool = True
 
 
-def _get_firebase_app() -> Optional[firebase_admin.App]:
+def _get_firebase_app() -> firebase_admin.App | None:
     """Lazy-initialize the Firebase Admin SDK. Returns None if unavailable.
 
     Uses Application Default Credentials (ADC) which auto-detects
@@ -46,7 +45,7 @@ def _get_firebase_app() -> Optional[firebase_admin.App]:
                 _firebase_app = firebase_admin.initialize_app()
                 logger.info("[Firebase] Admin SDK initialized (ADC)")
             except Exception as e:
-                logger.warning(f"[Firebase] Initialization failed: {e}")
+                logger.warning("[Firebase] Initialization failed: %s", e)
                 _firebase_available = False
                 return None
 
@@ -77,7 +76,7 @@ def verify_id_token(token: str) -> dict:
 
     try:
         decoded = firebase_auth.verify_id_token(token, app=app)
-        logger.debug(f"[Firebase] Token verified for uid={decoded.get('uid')}")
+        logger.debug("[Firebase] Token verified for uid=%s", decoded.get("uid"))
         return decoded
     except firebase_auth.InvalidIdTokenError as e:
         raise ValueError(f"Invalid Firebase ID token: {e}") from e

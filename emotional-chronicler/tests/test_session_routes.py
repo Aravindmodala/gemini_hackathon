@@ -53,7 +53,7 @@ class TestListSessions:
         ]
 
         with patch("app.server.auth_middleware.verify_id_token") as mock_verify, \
-             patch("app.server.session_routes.SessionStore") as mock_store_cls:
+             patch("app.server.session_routes.SessionQueryService") as mock_store_cls:
             mock_verify.return_value = {"uid": "test-user-123", "email": "test@example.com"}
             mock_store_cls.list_sessions.return_value = (mock_sessions, None)
 
@@ -109,7 +109,7 @@ class TestGetSession:
         }
 
         with patch("app.server.auth_middleware.verify_id_token") as mock_verify, \
-             patch("app.server.session_routes.SessionStore") as mock_store_cls:
+             patch("app.server.session_routes.SessionQueryService") as mock_store_cls:
             mock_verify.return_value = {"uid": "test-user-123", "email": "test@example.com"}
             mock_store_cls.get_session.return_value = mock_session
 
@@ -127,7 +127,7 @@ class TestGetSession:
     async def test_get_session_not_found_returns_404(self, client):
         """Non-existent session → 404."""
         with patch("app.server.auth_middleware.verify_id_token") as mock_verify, \
-             patch("app.server.session_routes.SessionStore") as mock_store_cls:
+             patch("app.server.session_routes.SessionQueryService") as mock_store_cls:
             mock_verify.return_value = {"uid": "test-user-123", "email": "test@example.com"}
             mock_store_cls.get_session.return_value = None
 
@@ -148,7 +148,7 @@ class TestDeleteSession:
     async def test_delete_session_deletes_session(self, client):
         """Successful delete → returns 204 No Content."""
         with patch("app.server.auth_middleware.verify_id_token") as mock_verify, \
-             patch("app.server.session_routes.SessionStore") as mock_store_cls:
+             patch("app.server.session_routes.SessionQueryService") as mock_store_cls:
             mock_verify.return_value = {"uid": "test-user-123", "email": "test@example.com"}
             mock_store_cls.get_session.return_value = {"session_id": "abc123", "title": "Dragon Tale"}
             mock_store_cls.delete_session.return_value = True
@@ -164,7 +164,7 @@ class TestDeleteSession:
     async def test_delete_session_failure_returns_500(self, client):
         """Delete failure → 500."""
         with patch("app.server.auth_middleware.verify_id_token") as mock_verify, \
-             patch("app.server.session_routes.SessionStore") as mock_store_cls:
+             patch("app.server.session_routes.SessionQueryService") as mock_store_cls:
             mock_verify.return_value = {"uid": "test-user-123", "email": "test@example.com"}
             mock_store_cls.get_session.return_value = {"session_id": "abc123", "title": "Dragon Tale"}
             mock_store_cls.delete_session.return_value = False
@@ -186,7 +186,7 @@ class TestUpdateSession:
     async def test_update_session_updates_title(self, client):
         """Valid title update → returns updated session data."""
         with patch("app.server.auth_middleware.verify_id_token") as mock_verify, \
-             patch("app.server.session_routes.SessionStore") as mock_store_cls:
+             patch("app.server.session_routes.SessionQueryService") as mock_store_cls:
             mock_verify.return_value = {"uid": "test-user-123", "email": "test@example.com"}
             mock_store_cls.get_session.return_value = {"session_id": "abc123", "title": "Dragon Tale"}
             mock_store_cls.update_session_title.return_value = True
@@ -219,7 +219,7 @@ class TestUpdateSession:
     async def test_update_session_failure_returns_500(self, client):
         """Update failure → 500."""
         with patch("app.server.auth_middleware.verify_id_token") as mock_verify, \
-             patch("app.server.session_routes.SessionStore") as mock_store_cls:
+             patch("app.server.session_routes.SessionQueryService") as mock_store_cls:
             mock_verify.return_value = {"uid": "test-user-123", "email": "test@example.com"}
             mock_store_cls.get_session.return_value = {"session_id": "abc123", "title": "Dragon Tale"}
             mock_store_cls.update_session_title.return_value = False

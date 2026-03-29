@@ -88,21 +88,21 @@ def _make_empty_event() -> MagicMock:
     return event
 
 
-# ── _sse helper ────────────────────────────────────────────────────────────────
+# ── format_sse_event helper ───────────────────────────────────────────────────
 
 class TestSseHelper:
     def test_sse_formats_payload_as_data_line(self):
-        from app.server.routes import _sse
-        result = _sse({"type": "text", "chunk": "hello"})
+        from app.server.sse import format_sse_event
+        result = format_sse_event({"type": "text", "chunk": "hello"})
         assert result.startswith("data: ")
         assert result.endswith("\n\n")
         parsed = json.loads(result[6:])
         assert parsed == {"type": "text", "chunk": "hello"}
 
     def test_sse_handles_nested_objects(self):
-        from app.server.routes import _sse
+        from app.server.sse import format_sse_event
         payload = {"type": "image", "url": "/api/images/abc.png", "caption": "A forest"}
-        result = _sse(payload)
+        result = format_sse_event(payload)
         parsed = json.loads(result[6:])
         assert parsed["type"] == "image"
         assert parsed["url"] == "/api/images/abc.png"
@@ -333,7 +333,7 @@ class TestGenerateStory:
         mock_store.create_session.return_value = "store-sess-1"
 
         with patch("app.server.routes.get_optional_user", new=AsyncMock(return_value={"uid": "auth-user-123"})), \
-             patch("app.server.routes.SessionStore", return_value=mock_store), \
+             patch("app.server.session_resolver.SessionStore", return_value=mock_store), \
              patch("app.server.routes.runner") as mock_runner:
             mock_runner.session_service.get_session = AsyncMock(return_value=None)
             mock_runner.session_service.create_session = AsyncMock()
@@ -347,7 +347,7 @@ class TestGenerateStory:
 
         assert captured["user_id"] == "auth-user-123"
         assert captured["session_id"] == "store-sess-1"
-        mock_store.create_session.assert_called_once_with()
+        mock_store.create_session.assert_called_once_with("Untitled Story")
 
     @pytest.mark.asyncio
     async def test_story_auth_creates_session_when_missing_session_id(self, client):
@@ -363,7 +363,7 @@ class TestGenerateStory:
         mock_store.create_session.return_value = "new-store-session"
 
         with patch("app.server.routes.get_optional_user", new=AsyncMock(return_value={"uid": "auth-user-abc"})), \
-             patch("app.server.routes.SessionStore", return_value=mock_store), \
+             patch("app.server.session_resolver.SessionStore", return_value=mock_store), \
              patch("app.server.routes.runner") as mock_runner:
             mock_runner.session_service.get_session = AsyncMock(return_value=None)
             mock_runner.session_service.create_session = AsyncMock()
@@ -376,7 +376,7 @@ class TestGenerateStory:
             )
 
         assert response.status_code == 200
-        mock_store.create_session.assert_called_once_with()
+        mock_store.create_session.assert_called_once_with("Untitled Story")
         assert captured["session_id"] == "new-store-session"
 
     @pytest.mark.asyncio
@@ -393,7 +393,7 @@ class TestGenerateStory:
         mock_store.resume_session.return_value = True
 
         with patch("app.server.routes.get_optional_user", new=AsyncMock(return_value={"uid": "auth-user-xyz"})), \
-             patch("app.server.routes.SessionStore", return_value=mock_store), \
+             patch("app.server.session_resolver.SessionStore", return_value=mock_store), \
              patch("app.server.routes.runner") as mock_runner:
             mock_runner.session_service.get_session = AsyncMock(return_value=None)
             mock_runner.session_service.create_session = AsyncMock()

@@ -9,10 +9,9 @@ The ADK agent picks up GCP credentials via Application Default Credentials (ADC)
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
 from google import genai
 
-load_dotenv()
+# Environment must be loaded by the entry point (main.py) before importing this module.
 
 # ── Paths ────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -35,7 +34,7 @@ os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
 # ── Models ───────────────────────────────────────────────────
 STORY_MODEL = os.environ.get("STORY_MODEL", "gemini-3.1-pro-preview")  # ADK agent brain
 IMAGEN_MODEL = os.environ.get("IMAGEN_MODEL", "imagen-4.0-generate-001")  # Imagen 4
-COMPANION_MODEL = os.environ.get("COMPANION_MODEL", "gemini-3-flash-preview")  # Pre-story companion
+COMPANION_MODEL = os.environ.get("COMPANION_MODEL", "gemini-2.0-flash")  # Pre-story companion
 LYRIA_MODEL = "lyria-002"  # Lyria 2 music generation
 
 # ── Firebase Authentication ───────────────────────────────────
