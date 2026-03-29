@@ -227,84 +227,6 @@ class SessionStore:
         except Exception as e:
             logger.warning("[Store] Failed to save companion proposal: %s", e)
 
-    def get_companion_context(self) -> str | None:
-        """
-        Format companion interactions as narrative context for the story agent.
-
-        Returns a formatted string with the traveler's emotions, the proposed
-        story title/brief, and the conversation history — ready to be injected
-        into Elora's story prompt.
-        """
-        if not self._doc_ref:
-            return None
-
-        try:
-            doc = self._doc_ref.get()
-            if not doc.exists:
-                return None
-
-            data = doc.to_dict()
-            interactions = data.get("interactions", [])
-            proposal = data.get("companion_proposal", {})
-
-            if not interactions and not proposal:
-                return None
-
-            lines = []
-
-            # Proposal context
-            if proposal:
-                lines.append(f"STORY TITLE: {proposal.get('title', 'Untitled')}")
-                lines.append(f"STORY BRIEF: {proposal.get('brief', '')}")
-                emotions = proposal.get("emotions", [])
-                if emotions:
-                    lines.append(f"TRAVELER'S EMOTIONS: {', '.join(emotions)}")
-                genre = proposal.get("genre", "")
-                if genre:
-                    lines.append(f"GENRE: {genre}")
-                tone = proposal.get("tone", "")
-                if tone:
-                    lines.append(f"TONE: {tone}")
-                lines.append("")
-
-            # Conversation history
-            if interactions:
-                def _companion_fmt(entry):
-                    role = entry.get("role", "")
-                    text = entry.get("text", "")
-                    if role == "user" and text:
-                        return f'  Traveler: "{text}"'
-                    elif role == "elora" and text:
-                        return f'  Elora: "{text}"'
-                    return None
-
-                conversation = _format_interaction_lines(interactions, 30, _companion_fmt)
-                if conversation:
-                    lines.append("COMPANION CONVERSATION:")
-                    lines.append(conversation)
-
-            if not lines:
-                return None
-
-            context = "\n".join(lines)
-            return (
-                "\n\n═══════════════════════════════════════════════════════════════\n"
-                "COMPANION CONTEXT — THE TRAVELER'S EMOTIONAL STATE\n"
-                "═══════════════════════════════════════════════════════════════\n\n"
-                "Before this story begins, you (Elora) had a conversation with this "
-                "traveler to understand their mood and what kind of story they need. "
-                "Here is what you learned:\n\n"
-                f"{context}\n\n"
-                "Use this context to shape every aspect of the story — its tone, "
-                "themes, emotional arc, and imagery. The traveler chose this story "
-                "because it resonates with how they feel right now. Honor that.\n"
-                "═══════════════════════════════════════════════════════════════"
-            )
-
-        except Exception as e:
-            logger.warning("[Store] Failed to load companion context: %s", e)
-            return None
-
     def get_companion_data(self) -> tuple[str | None, str | None, str | None]:
         """Returns (context_str, proposed_title, proposed_brief) in one Firestore fetch."""
         if not self._doc_ref:
@@ -322,7 +244,7 @@ class SessionStore:
             if not interactions and not proposal:
                 return None, None, None
 
-            # ── Build context string (same logic as get_companion_context) ──
+            # ── Build context string ──
             lines = []
 
             if proposal:
@@ -380,20 +302,6 @@ class SessionStore:
         except Exception as e:
             logger.warning("[Store] Failed to load companion data: %s", e)
             return None, None, None
-
-    def get_companion_title(self) -> tuple[str, str] | tuple[None, None]:
-        """Return (title, brief) from the companion proposal, or (None, None) if unavailable."""
-        if not self._doc_ref:
-            return None, None
-        try:
-            doc = self._doc_ref.get()
-            if not doc.exists:
-                return None, None
-            proposal = doc.to_dict().get("companion_proposal", {})
-            return proposal.get("title") or None, proposal.get("brief", "")
-        except Exception as e:
-            logger.warning("[Store] Failed to get companion title: %s", e)
-            return None, None
 
     def resume_session(self, session_id: str) -> bool:
         """Attach to an existing session. Returns True if it exists in Firestore.
