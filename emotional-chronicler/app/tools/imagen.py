@@ -2,6 +2,7 @@
 Imagen 4 — story illustration tool for the ADK agent.
 
 Generates scene illustrations using Google's Imagen 4 model on Vertex AI.
+Saves images to Google Cloud Storage for persistent access.
 Designed as a plain async function so the Google ADK can register it as a tool.
 
 API Reference:
@@ -13,7 +14,7 @@ import uuid
 
 from google.genai import types as genai_types
 
-from app.config import get_genai_client, IMAGEN_MODEL, IMAGE_CACHE_DIR
+from app.config import get_genai_client, IMAGEN_MODEL, IMAGE_CACHE_DIR, upload_to_gcs
 
 logger = logging.getLogger("chronicler")
 
@@ -39,7 +40,7 @@ async def generate_image(
 
     Returns:
         dict with keys:
-            image_url: Absolute URL to the saved image (e.g. http://localhost:3000/api/images/abc.png).
+            image_url: Public URL to the saved image on GCS.
             caption: Short caption derived from the scene description.
             error: Present only if generation failed.
     """
@@ -64,13 +65,22 @@ async def generate_image(
 
         image_bytes = response.generated_images[0].image.image_bytes
         filename = f"{uuid.uuid4().hex}.png"
+
+        # Save to local cache (fast serving during current session)
         filepath = IMAGE_CACHE_DIR / filename
         filepath.write_bytes(image_bytes)
 
-        logger.info("[Imagen] Saved %s (%s bytes)", filename, f"{len(image_bytes):,}")
+        # Upload to GCS (persistent storage)
+        try:
+            gcs_url = upload_to_gcs(f"images/{filename}", image_bytes, "image/png")
+            logger.info("[Imagen] Uploaded to GCS: %s (%s bytes)", filename, f"{len(image_bytes):,}")
+            image_url = gcs_url
+        except Exception as gcs_err:
+            logger.warning("[Imagen] GCS upload failed, falling back to local: %s", gcs_err)
+            image_url = f"/api/images/{filename}"
 
         return {
-            "image_url": f"/api/images/{filename}",
+            "image_url": image_url,
             "caption": scene_description[:140],
         }
 
