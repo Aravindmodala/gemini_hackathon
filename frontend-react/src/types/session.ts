@@ -21,12 +21,14 @@ export interface Interaction {
 }
 
 export interface ImageToolResult {
-  url: string;
+  image_url?: string;  // Key used by generate_image tool
+  url?: string;        // Fallback key used by SSE events
   caption?: string;
 }
 
 export interface MusicToolResult {
-  audio_url?: string;
-  url?: string;
+  audio_url?: string;  // Key used by generate_music tool
+  url?: string;        // Fallback key
   duration?: number;
+  duration_seconds?: number;
 }

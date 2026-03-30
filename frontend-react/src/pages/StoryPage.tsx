@@ -54,23 +54,23 @@ export function StoryPage() {
           const imgArgs = args as unknown as ImageToolResult;
           const musArgs = args as unknown as MusicToolResult;
 
-          const imageUrl = typeof imgArgs.url === 'string' ? imgArgs.url : null;
-          const musicUrl = typeof musArgs.audio_url === 'string'
-            ? musArgs.audio_url
-            : (interaction.name?.toLowerCase().includes('music') && typeof musArgs.url === 'string' ? musArgs.url : null);
+          // generate_image stores: { image_url: "...", caption: "..." }
+          const imageUrl = imgArgs.image_url ?? imgArgs.url ?? null;
+          // generate_music stores: { audio_url: "...", duration_seconds: 33 }
+          const musicUrl = musArgs.audio_url ?? musArgs.url ?? null;
 
-          if (imageUrl) {
+          if (interaction.name === 'generate_image' && imageUrl) {
             nextSections.push({
               type: 'image',
               url: resolveAssetUrl(imageUrl),
               caption: typeof imgArgs.caption === 'string' ? imgArgs.caption : '',
             });
           }
-          if (musicUrl) {
+          if (interaction.name === 'generate_music' && musicUrl) {
             nextSections.push({
               type: 'music',
               url: resolveAssetUrl(musicUrl),
-              duration: typeof musArgs.duration === 'number' ? musArgs.duration : 33,
+              duration: musArgs.duration_seconds ?? musArgs.duration ?? 33,
             });
           }
         }
