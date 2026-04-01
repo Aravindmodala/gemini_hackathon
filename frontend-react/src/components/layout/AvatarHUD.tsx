@@ -1,4 +1,4 @@
-import type { StoryStatus } from '../hooks/useStoryteller';
+import type { StoryStatus } from '../../hooks/useStoryteller';
 
 interface AvatarHUDProps {
   status: StoryStatus;

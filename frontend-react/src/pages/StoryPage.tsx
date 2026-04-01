@@ -7,8 +7,11 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useOutletContext } from 'react-router-dom';
-import { StoryView } from '../components/StoryView';
+import { StoryView } from '../components/story/StoryView';
+import { StoryBentoLayout } from '../components/story/StoryBentoLayout';
+import { StoryChatbot } from '../components/story/StoryChatbot';
 import { resolveAssetUrl } from '../utils/resolveAssetUrl';
+import { SIDEBAR_WIDTH } from '../config/layout';
 import type { AppOutletContext } from '../App';
 import type { StorySection } from '../hooks/useStoryteller';
 import type { Interaction, ImageToolResult, MusicToolResult } from '../types/session';
@@ -87,42 +90,66 @@ export function StoryPage() {
   const title = isLive ? (storyTitle ?? undefined) : savedTitle;
   const displayStatus = isLive ? status : 'done';
 
+  const sidebarOffset = isSidebarOpen ? SIDEBAR_WIDTH : 0;
+
   if (loadError) {
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100vh', color: '#94a3b8', fontFamily: "'Inter', sans-serif",
-        fontSize: 16,
-      }}>
-        Story not found.
-      </div>
+      <StoryBentoLayout
+        sidebarOffset={sidebarOffset}
+        storyContent={
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flex: 1, color: '#94a3b8', fontFamily: "'Inter', sans-serif",
+            fontSize: 16,
+          }}>
+            Story not found.
+          </div>
+        }
+        chatContent={<StoryChatbot isStoryGenerating={false} />}
+      />
     );
   }
 
   if (!isLive && hydratedSections.length === 0 && !loadError) {
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100vh',
-      }}>
-        <div style={{
-          width: 32, height: 32,
-          border: '3px solid rgba(124,58,237,0.2)', borderTopColor: '#7c3aed',
-          borderRadius: '50%', animation: 'authSpinner 0.8s linear infinite',
-        }} />
-        <style>{`@keyframes authSpinner { to { transform: rotate(360deg); } }`}</style>
-      </div>
+      <StoryBentoLayout
+        sidebarOffset={sidebarOffset}
+        storyContent={
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flex: 1,
+          }}>
+            <div style={{
+              width: 32, height: 32,
+              border: '3px solid rgba(124,58,237,0.2)', borderTopColor: '#7c3aed',
+              borderRadius: '50%', animation: 'authSpinner 0.8s linear infinite',
+            }} />
+          </div>
+        }
+        chatContent={<StoryChatbot storyTitle={title} isStoryGenerating={false} />}
+      />
     );
   }
 
   return (
-    <StoryView
-      key={isLive ? 'live' : id}
-      sections={sections}
-      status={displayStatus}
-      currentMusic={currentMusic}
-      title={title}
-      sidebarOffset={isSidebarOpen ? 300 : 0}
+    <StoryBentoLayout
+      sidebarOffset={sidebarOffset}
+      storyContent={
+        <StoryView
+          key={isLive ? 'live' : id}
+          sections={sections}
+          status={displayStatus}
+          currentMusic={currentMusic}
+          title={title}
+          cardMode
+        />
+      }
+      chatContent={
+        <StoryChatbot
+          storyTitle={title}
+          isStoryGenerating={displayStatus === 'generating'}
+        />
+      }
     />
   );
 }

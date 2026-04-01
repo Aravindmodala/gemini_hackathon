@@ -1,0 +1,120 @@
+/* ================================================================
+   STORY BENTO LAYOUT — Premium two-panel grid
+   Left: cinematic story reader (62%)
+   Right: AI companion chat (38%)
+   ================================================================ */
+
+.bentoContainer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: 62fr 38fr;
+  gap: 14px;
+  padding: 16px 20px 20px;
+  z-index: 15;
+  transition: left var(--transition-slow, 300ms ease);
+  /* Subtle ambient radial glow behind cards */
+  background: radial-gradient(
+    ellipse 70% 60% at 30% 50%,
+    rgba(124, 58, 237, 0.045) 0%,
+    transparent 70%
+  );
+}
+
+/* ── Bento card base ───────────────────────────────────────────── */
+.bentoCard {
+  position: relative;
+  background: var(--color-bg-glass, rgba(5, 5, 20, 0.82));
+  border: 1px solid var(--color-border, rgba(124, 58, 237, 0.18));
+  border-radius: var(--radius-lg, 16px);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  box-shadow:
+    0 0 0 1px rgba(167, 139, 250, 0.05),
+    0 32px 80px rgba(0, 0, 0, 0.55),
+    0 0 50px rgba(124, 58, 237, 0.08);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: bentoCardIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.bentoCard:last-child {
+  animation-delay: 0.12s;
+}
+
+/* First (story) card gets slightly stronger ambient presence */
+.bentoCard:first-child {
+  box-shadow:
+    0 0 0 1px rgba(167, 139, 250, 0.07),
+    0 32px 80px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(124, 58, 237, 0.1);
+}
+
+/* Top specular highlight line */
+.bentoCard::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(167, 139, 250, 0.55),
+    rgba(6, 182, 212, 0.25),
+    transparent
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Bottom inner shadow for depth */
+.bentoCard::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 80px;
+  background: linear-gradient(to bottom, transparent, rgba(5, 5, 20, 0.25));
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes bentoCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 1100px) and (min-width: 768px) {
+  .bentoContainer {
+    grid-template-columns: 58fr 42fr;
+    gap: 12px;
+    padding: 16px 16px 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  .bentoContainer {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+    gap: 12px;
+    padding: 12px 12px 12px;
+  }
+
+  .bentoCard:last-child {
+    max-height: 44vh;
+  }
+}

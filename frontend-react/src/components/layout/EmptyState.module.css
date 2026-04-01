@@ -1,0 +1,183 @@
+/* ================================================================
+   EMPTY STATE — Cinematic hero section
+   Apple/award-level: animated gradient title, floating stars, glows
+   ================================================================ */
+
+/* ── Root — flex child, fills hero zone ────────────────────────── */
+.root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ── Ambient glow blobs ────────────────────────────────────────── */
+.glowPurple {
+  position: absolute;
+  top: 15%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 560px;
+  height: 320px;
+  background: radial-gradient(ellipse at center, rgba(124, 58, 237, 0.2) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(70px);
+  pointer-events: none;
+  animation: glowPulse 7s ease-in-out infinite;
+}
+
+.glowTeal {
+  position: absolute;
+  bottom: 5%;
+  right: 15%;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(ellipse at center, rgba(6, 182, 212, 0.12) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  animation: glowPulse 9s ease-in-out infinite reverse;
+}
+
+.glowWarm {
+  position: absolute;
+  bottom: 10%;
+  left: 10%;
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(ellipse at center, rgba(245, 158, 11, 0.06) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+  animation: glowPulse 11s ease-in-out infinite;
+}
+
+/* ── Floating stars ─────────────────────────────────────────────── */
+.star {
+  position: absolute;
+  color: var(--color-purple-light, #a78bfa);
+  pointer-events: none;
+  text-shadow: 0 0 14px rgba(124, 58, 237, 0.75);
+  animation: floatStar 5s ease-in-out infinite;
+}
+
+@keyframes floatStar {
+  0%   { opacity: 0;    transform: translateY(4px) scale(0.8); }
+  25%  { opacity: 0.7;  }
+  75%  { opacity: 0.55; }
+  100% { opacity: 0;    transform: translateY(-10px) scale(1.1); }
+}
+
+/* ── Main content block ─────────────────────────────────────────── */
+.content {
+  text-align: center;
+  position: relative;
+  z-index: 1;
+  max-width: 660px;
+  padding: 0 20px;
+}
+
+/* Eyebrow */
+.eyebrow {
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-size: 11px;
+  color: rgba(167, 139, 250, 0.65);
+  letter-spacing: 0.38em;
+  text-transform: uppercase;
+  margin: 0 0 12px;
+  animation: fadeSlideUp 0.7s ease-out 0.1s both;
+}
+
+/* Main title — animated shimmer gradient */
+.title {
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-size: clamp(30px, 4.2vw, 58px);
+  font-weight: 700;
+  background: linear-gradient(
+    135deg,
+    #ffffff 0%,
+    #c4b5fd 30%,
+    #a78bfa 50%,
+    #67e8f9 75%,
+    #c4b5fd 100%
+  );
+  background-size: 250% 250%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.07em;
+  line-height: 1.15;
+  margin: 0 0 16px;
+  animation:
+    fadeSlideUp 0.8s ease-out 0.2s both,
+    shimmerGradient 6s ease-in-out infinite;
+}
+
+/* Ornamental divider */
+.divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 0 0 14px;
+  animation: fadeSlideUp 0.7s ease-out 0.38s both;
+}
+
+.dividerLine {
+  display: block;
+  width: 80px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(167, 139, 250, 0.4), transparent);
+}
+
+.dividerGem {
+  font-size: 13px;
+  color: var(--color-purple-light, #a78bfa);
+  opacity: 0.75;
+  filter: drop-shadow(0 0 8px rgba(124, 58, 237, 0.65));
+  animation: gemPulse 3s ease-in-out infinite;
+}
+
+@keyframes gemPulse {
+  0%, 100% { opacity: 0.75; filter: drop-shadow(0 0 8px rgba(124,58,237,0.65)); }
+  50%       { opacity: 1;    filter: drop-shadow(0 0 16px rgba(124,58,237,0.95)); }
+}
+
+/* Subtitle */
+.subtitle {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(13px, 1.4vw, 16px);
+  color: rgba(148, 163, 184, 0.75);
+  line-height: 1.85;
+  font-style: italic;
+  margin: 0;
+  animation: fadeSlideUp 0.7s ease-out 0.55s both;
+}
+
+/* ── Shared animations ──────────────────────────────────────────── */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmerGradient {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 1.0; }
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .dividerLine { width: 48px; }
+}

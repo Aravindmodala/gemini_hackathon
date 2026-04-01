@@ -8,7 +8,7 @@
 
 import { useCallback } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
-import { CompanionChat } from '../components/CompanionChat';
+import { CompanionChat } from '../components/companion/CompanionChat';
 import type { AppOutletContext } from '../App';
 
 export function CompanionPage() {

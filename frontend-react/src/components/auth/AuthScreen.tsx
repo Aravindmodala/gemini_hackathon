@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 /* ══════════════════════════════════════════════════════
    AuthScreen — Sign In / Sign Up for The Emotional Chronicler

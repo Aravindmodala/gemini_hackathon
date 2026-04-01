@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
-import type { Session } from '../types/session';
-import { SIDEBAR_WIDTH } from '../config/layout';
+import type { Session } from '../../types/session';
+import { SIDEBAR_WIDTH } from '../../config/layout';
 
 /* ── helpers ─────────────────────────────────────── */
 

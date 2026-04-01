@@ -6,7 +6,7 @@
  */
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { AuthScreen } from '../AuthScreen';
+import { AuthScreen } from '../auth/AuthScreen';
 
 // ── Mock useAuth ────────────────────────────────────────────
 const mockSignInWithGoogle = vi.fn();

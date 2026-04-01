@@ -13,7 +13,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
-import type { ChatMessage, StoryProposal } from '../hooks/useCompanionChat';
+import type { ChatMessage, StoryProposal } from '../../hooks/useCompanionChat';
 import styles from './CompanionChat.module.css';
 
 // ── Props ──────────────────────────────────────────────────────────────────────
