@@ -1,208 +1,318 @@
 import { useEffect, useRef } from 'react';
+import type { CSSProperties } from 'react';
 import type { StorySection, StoryStatus } from '../hooks/useStoryteller';
 
 interface StoryViewProps {
   sections: StorySection[];
   status: StoryStatus;
   currentMusic: string | null;
+  title?: string;
+  sidebarOffset?: number;
 }
 
-export function StoryView({ sections, status, currentMusic }: StoryViewProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
-  // Auto-scroll as new content arrives
+export function StoryView({ sections, status, currentMusic, title, sidebarOffset }: StoryViewProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [sections]);
+  }, [sections, status]);
 
-  // Trigger animation on first mount
-  useEffect(() => {
-    if (panelRef.current && sections.length > 0) {
-      panelRef.current.style.animation = 'slide-up 0.5s ease-out forwards';
+  // Find index of last text section for cursor placement
+  let lastTextIndex = -1;
+  for (let i = sections.length - 1; i >= 0; i--) {
+    if (sections[i].type === 'text') {
+      lastTextIndex = i;
+      break;
     }
-  }, []);
+  }
 
   return (
-    <div ref={panelRef} style={styles.panel}>
-      <div style={styles.scroll}>
+    <>
+      <style>{`
+        @keyframes sv-fadeslide {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
 
-        {sections.map((section, i) => {
-          if (section.type === 'text') {
-            return (
-              <p key={i} style={styles.prose}>
-                {section.content}
-              </p>
-            );
-          }
+        @keyframes sv-blink {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0; }
+        }
 
-          if (section.type === 'image') {
-            return (
-              <figure key={i} style={{ ...styles.figure, animation: 'slide-up 0.5s ease-out' }}>
-                <img
-                  src={section.url}
-                  alt={section.caption}
-                  style={styles.image}
-                  loading="lazy"
-                  onLoad={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.animation = 'scale-in 0.4s ease-out';
+        @keyframes sv-wave {
+          0%, 100% { transform: scaleY(0.4); }
+          50%       { transform: scaleY(1); }
+        }
+
+        .sv-scroll::-webkit-scrollbar {
+          width: 4px;
+        }
+        .sv-scroll::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .sv-scroll::-webkit-scrollbar-thumb {
+          background: rgba(200, 169, 110, 0.2);
+          border-radius: 2px;
+        }
+      `}</style>
+
+      <div className="sv-scroll" style={{ ...styles.container, left: sidebarOffset ?? 0 }}>
+        <div style={styles.column}>
+
+          {/* Title header or spacer */}
+          {title ? (
+            <header style={styles.header}>
+              <p style={styles.eyebrow}>THE EMOTIONAL CHRONICLER</p>
+              <h1 style={styles.title}>{title}</h1>
+              <div style={styles.rule} />
+            </header>
+          ) : (
+            <div style={{ height: 72 }} />
+          )}
+
+          {/* Story sections */}
+          {sections.map((section, i) => {
+            const delay = Math.min(i * 0.04, 0.6);
+
+            if (section.type === 'text') {
+              const prevIsText = i > 0 && sections[i - 1].type === 'text';
+              const isLastText = status === 'generating' && i === lastTextIndex;
+
+              return (
+                <p
+                  key={i}
+                  style={{
+                    ...styles.prose,
+                    textIndent: prevIsText ? '2em' : '0',
+                    animation: `sv-fadeslide 0.5s ease-out forwards`,
+                    animationDelay: `${delay}s`,
+                    opacity: 0,
                   }}
-                />
-                {section.caption && (
-                  <figcaption style={styles.caption}>{section.caption}</figcaption>
-                )}
-              </figure>
-            );
-          }
+                >
+                  {section.content}
+                  {isLastText && (
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: 2,
+                        height: 20,
+                        background: '#c8a96e',
+                        marginLeft: 4,
+                        verticalAlign: 'text-bottom',
+                        animation: 'sv-blink 1s step-end infinite',
+                      }}
+                    />
+                  )}
+                </p>
+              );
+            }
 
-          if (section.type === 'music') {
-            const isPlaying = currentMusic === section.url;
-            return (
-              <div key={i} style={styles.musicBadge}>
-                <MusicIcon active={isPlaying} />
-                <span style={styles.musicLabel}>
-                  {isPlaying ? 'Playing background music…' : 'Background music generated'}
-                </span>
-                <audio
-                  src={section.url}
-                  controls
-                  style={styles.audioControl}
-                />
-              </div>
-            );
-          }
+            if (section.type === 'image') {
+              return (
+                <div key={i}>
+                  <div style={styles.separator}>· · ·</div>
+                  <figure
+                    style={{
+                      ...styles.figure,
+                      animation: 'sv-fadeslide 0.6s ease-out forwards',
+                      animationDelay: `${delay}s`,
+                      opacity: 0,
+                    }}
+                  >
+                    <img
+                      src={section.url}
+                      alt={section.caption}
+                      loading="lazy"
+                      style={styles.image}
+                    />
+                    {section.caption && (
+                      <figcaption style={styles.caption}>{section.caption}</figcaption>
+                    )}
+                  </figure>
+                </div>
+              );
+            }
 
-          return null;
-        })}
+            if (section.type === 'music') {
+              const isPlaying = currentMusic === section.url;
+              const waveDelays = ['0s', '0.15s', '0.3s', '0.15s'];
 
-        {/* Generating indicator */}
-        {status === 'generating' && (
-          <div style={styles.generating}>
-            <span style={styles.cursor} />
-          </div>
-        )}
+              return (
+                <div key={i} style={styles.musicWrapper}>
+                  <div style={styles.musicPill}>
+                    {/* Icon area */}
+                    {isPlaying ? (
+                      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 18 }}>
+                        {waveDelays.map((d, wi) => (
+                          <div
+                            key={wi}
+                            style={{
+                              width: 3,
+                              height: 18,
+                              background: '#c8a96e',
+                              borderRadius: 2,
+                              transformOrigin: 'bottom',
+                              animation: `sv-wave 0.8s ease-in-out infinite`,
+                              animationDelay: d,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <span
+                        style={{
+                          fontFamily: "'Playfair Display', Georgia, serif",
+                          fontSize: 20,
+                          color: '#c8a96e',
+                          lineHeight: 1,
+                        }}
+                      >
+                        ♪
+                      </span>
+                    )}
 
-        <div ref={bottomRef} />
+                    {/* Label */}
+                    <span style={{ ...styles.musicLabel, color: isPlaying ? '#c8a96e' : '#8a7a6a' }}>
+                      {isPlaying ? 'NOW PLAYING' : 'CHAPTER SCORE'}
+                    </span>
+
+                    {/* Duration */}
+                    <span style={styles.musicDuration}>{formatDuration(section.duration)}</span>
+                  </div>
+                </div>
+              );
+            }
+
+            return null;
+          })}
+
+          {/* Bottom sentinel for auto-scroll */}
+          <div ref={bottomRef} />
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
-function MusicIcon({ active }: { active: boolean }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke={active ? '#a78bfa' : '#64748b'}
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{ flexShrink: 0, animation: active ? 'pulse-orb 1.5s ease-in-out infinite' : 'none' }}
-    >
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
-  );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  panel: {
+const styles: Record<string, CSSProperties> = {
+  container: {
     position: 'fixed',
-    top: '10vh',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    width: 'min(740px, 90vw)',
-    maxHeight: '72vh',
-    display: 'flex',
-    flexDirection: 'column',
-    background: 'rgba(5, 5, 20, 0.82)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    border: '1px solid rgba(124, 58, 237, 0.2)',
-    borderRadius: 16,
-    boxShadow: '0 8px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(124,58,237,0.08)',
-    zIndex: 20,
-    overflow: 'hidden',
-  },
-  scroll: {
+    top: 0,
+    left: 0,  // overridden by sidebarOffset prop at render time
+    right: 0,
+    bottom: 0,
+    zIndex: 15,
     overflowY: 'auto',
-    padding: '28px 32px 24px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 0,
-    scrollbarWidth: 'thin',
-    scrollbarColor: 'rgba(124,58,237,0.3) transparent',
+    background: '#0c0c1a',
   },
-  prose: {
-    fontFamily: "'Georgia', 'Times New Roman', serif",
-    fontSize: 17,
-    lineHeight: 1.85,
-    color: '#e2e8f0',
+  column: {
+    maxWidth: 720,
+    margin: '0 auto',
+    padding: '0 32px 80px',
+  },
+
+  // Title header
+  header: {
+    padding: '80px 0 48px',
+    borderBottom: '1px solid rgba(200,169,110,0.15)',
+    marginBottom: 56,
+    textAlign: 'center',
+  },
+  eyebrow: {
+    fontFamily: "'Cinzel', serif",
+    fontSize: 10,
+    color: '#c8a96e',
+    letterSpacing: '0.35em',
     margin: '0 0 20px 0',
-    textAlign: 'justify' as const,
-    textIndent: '1.5em',
-    letterSpacing: '0.01em',
+    textTransform: 'uppercase' as const,
   },
+  title: {
+    fontFamily: "'Playfair Display', Georgia, serif",
+    fontSize: 40,
+    fontWeight: 700,
+    color: '#f0e6d3',
+    lineHeight: 1.2,
+    margin: 0,
+  },
+  rule: {
+    width: 60,
+    height: 1,
+    background: 'rgba(200,169,110,0.4)',
+    margin: '20px auto 0',
+  },
+
+  // Text prose
+  prose: {
+    fontFamily: "'Playfair Display', Georgia, serif",
+    fontSize: 19,
+    lineHeight: 1.9,
+    color: '#f0e6d3',
+    textAlign: 'justify' as const,
+    letterSpacing: '0.012em',
+    margin: '0 0 28px 0',
+  },
+
+  // Decorative separator
+  separator: {
+    textAlign: 'center' as const,
+    color: 'rgba(200,169,110,0.4)',
+    fontSize: 14,
+    margin: '32px 0 32px',
+    letterSpacing: '0.4em',
+  },
+
+  // Image figure — negative bleed past column padding
   figure: {
-    margin: '24px 0',
+    margin: '0 -32px 48px',
     padding: 0,
-    borderRadius: 10,
-    overflow: 'hidden',
-    border: '1px solid rgba(124,58,237,0.2)',
-    boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
   },
   image: {
     width: '100%',
     height: 'auto',
     display: 'block',
-    objectFit: 'cover',
+    objectFit: 'cover' as const,
+    boxShadow: '0 24px 80px rgba(0,0,0,0.7)',
   },
   caption: {
-    padding: '10px 14px',
-    fontFamily: "'Inter', sans-serif",
-    fontSize: 12,
-    color: '#64748b',
-    fontStyle: 'italic',
-    background: 'rgba(0,0,0,0.3)',
+    fontFamily: "'Cinzel', serif",
+    fontSize: 11,
+    color: '#8a7a6a',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.2em',
+    textAlign: 'center' as const,
+    padding: '12px 16px',
   },
-  musicBadge: {
+
+  // Music badge
+  musicWrapper: {
     display: 'flex',
+    justifyContent: 'center',
+    margin: '32px 0',
+  },
+  musicPill: {
+    display: 'inline-flex',
     alignItems: 'center',
-    gap: 10,
-    padding: '10px 16px',
-    margin: '16px 0',
-    background: 'rgba(124,58,237,0.08)',
-    border: '1px solid rgba(124,58,237,0.2)',
-    borderRadius: 8,
-    flexWrap: 'wrap' as const,
+    gap: 12,
+    padding: '12px 24px',
+    borderRadius: 100,
+    border: '1px solid rgba(200,169,110,0.2)',
+    background: 'rgba(200,169,110,0.07)',
   },
   musicLabel: {
-    fontFamily: "'Inter', sans-serif",
-    fontSize: 13,
-    color: '#94a3b8',
-    flex: 1,
-    minWidth: 160,
+    fontFamily: "'Cinzel', serif",
+    fontSize: 11,
+    letterSpacing: '0.2em',
+    textTransform: 'uppercase' as const,
   },
-  audioControl: {
-    height: 28,
-    flex: '0 0 auto',
-    accentColor: '#7c3aed',
-    maxWidth: '100%',
-  },
-  generating: {
-    padding: '4px 0 8px',
-    display: 'flex',
-    alignItems: 'center',
-  },
-  cursor: {
-    display: 'inline-block',
-    width: 2,
-    height: 20,
-    background: '#7c3aed',
-    borderRadius: 1,
-    animation: 'blink 1s step-end infinite',
+  musicDuration: {
+    fontFamily: 'monospace',
+    fontSize: 12,
+    color: '#8a7a6a',
   },
 };

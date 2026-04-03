@@ -5,7 +5,6 @@ Firebase ID tokens from HTTP requests and WebSocket connections.
 """
 
 import logging
-from typing import Optional
 
 from fastapi import HTTPException, Request
 
@@ -45,11 +44,11 @@ async def get_current_user(request: Request) -> dict:
         decoded = verify_id_token(token)
         return decoded
     except ValueError as e:
-        logger.warning(f"[Auth] Token verification failed: {e}")
-        raise HTTPException(status_code=401, detail=str(e))
+        logger.warning("[Auth] Token verification failed: %s", e)
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 
-async def get_optional_user(request: Request) -> Optional[dict]:
+async def get_optional_user(request: Request) -> dict | None:
     """FastAPI dependency: optionally extract user from Authorization header.
 
     Returns the decoded token if a valid Bearer token is present,
@@ -68,21 +67,3 @@ async def get_optional_user(request: Request) -> Optional[dict]:
 
     # If a header IS present, it must be valid
     return await get_current_user(request)
-
-
-def verify_ws_token(token: str) -> dict:
-    """Verify a Firebase ID token for WebSocket connections.
-
-    WebSocket connections pass the token as a query parameter
-    rather than an Authorization header.
-
-    Args:
-        token: The Firebase ID token string.
-
-    Returns:
-        Decoded token dict containing at minimum ``uid``.
-
-    Raises:
-        ValueError: If the token is invalid, expired, or revoked.
-    """
-    return verify_id_token(token)

@@ -1,4 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { API_BASE } from '../config/api';
+import { resolveAssetUrl } from '../utils/resolveAssetUrl';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -15,12 +17,12 @@ export interface StorytellerOptions {
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
 export function useStoryteller(options?: StorytellerOptions) {
   const [status, setStatus] = useState<StoryStatus>('idle');
   const [sections, setSections] = useState<StorySection[]>([]);
   const [currentMusic, setCurrentMusic] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [storyTitle, setStoryTitle] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -54,7 +56,7 @@ export function useStoryteller(options?: StorytellerOptions) {
 
   // ── Start story ─────────────────────────────────────────────────────────────
 
-  const startStory = useCallback(async (prompt: string) => {
+  const startStory = useCallback(async (prompt: string, companionSessionId?: string) => {
     // Abort any in-flight request
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -68,6 +70,8 @@ export function useStoryteller(options?: StorytellerOptions) {
     }
 
     setSections([]);
+    setSessionId(null);
+    setStoryTitle(null);
     setStatus('generating');
 
     try {
@@ -82,7 +86,10 @@ export function useStoryteller(options?: StorytellerOptions) {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          prompt,
+          ...(companionSessionId ? { companion_session_id: companionSessionId } : {}),
+        }),
         signal: controller.signal,
       });
 
@@ -115,24 +122,34 @@ export function useStoryteller(options?: StorytellerOptions) {
           }
 
           switch (event.type) {
+            case 'session':
+              setSessionId(event.session_id as string);
+              break;
+
+            case 'title':
+              setStoryTitle(event.title as string);
+              break;
+
             case 'text':
               appendText(event.chunk as string);
               break;
 
-            case 'image':
+            case 'image': {
+              const imgUrl = resolveAssetUrl(event.url as string);
               setSections(prev => [
                 ...prev,
-                { type: 'image', url: event.url as string, caption: (event.caption as string) ?? '' },
+                { type: 'image', url: imgUrl, caption: (event.caption as string) ?? '' },
               ]);
               break;
+            }
 
             case 'music': {
-              const url = event.url as string;
+              const musicUrl = resolveAssetUrl(event.url as string);
               setSections(prev => [
                 ...prev,
-                { type: 'music', url, duration: (event.duration as number) ?? 33 },
+                { type: 'music', url: musicUrl, duration: (event.duration as number) ?? 33 },
               ]);
-              playMusic(url);
+              playMusic(musicUrl);
               break;
             }
 
@@ -149,7 +166,7 @@ export function useStoryteller(options?: StorytellerOptions) {
       }
 
       // Stream ended without explicit done (normal on abort)
-      if (status === 'generating') setStatus('done');
+      setStatus(prev => prev === 'generating' ? 'done' : prev);
 
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') {
@@ -187,6 +204,8 @@ export function useStoryteller(options?: StorytellerOptions) {
     status,
     sections,
     currentMusic,
+    sessionId,
+    storyTitle,
     startStory,
     stopStory,
   };

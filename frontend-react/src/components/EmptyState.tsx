@@ -1,22 +1,8 @@
-import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 
-interface EmptyStateProps {
-  // No props needed for now
-}
-
-export function EmptyState(_props: EmptyStateProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // Trigger fade-in animation
-    if (containerRef.current) {
-      containerRef.current.style.animation = 'fade-in 0.6s ease-out forwards';
-    }
-  }, []);
-
+export function EmptyState() {
   return (
-    <div ref={containerRef} style={styles.container}>
+    <div style={styles.container}>
       {/* Background glow elements */}
       <div style={styles.glowTop} />
       <div style={styles.glowBottom} />

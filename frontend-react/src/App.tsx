@@ -1,17 +1,46 @@
 import { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { Outlet, useNavigate } from 'react-router-dom';
 import { AvatarHUD } from './components/AvatarHUD';
-import { StoryPrompt } from './components/StoryPrompt';
-import { BookView } from './components/BookView';
-import { AuthScreen } from './components/AuthScreen';
 import { SessionSidebar } from './components/SessionSidebar';
-import { EmptyState } from './components/EmptyState';
 import { useAuth } from './contexts/AuthContext';
 import { useStoryteller } from './hooks/useStoryteller';
 import { useSessions } from './hooks/useSessions';
-import type { StorySection } from './hooks/useStoryteller';
-import type { Interaction } from './types/session';
+import { useCompanionChat } from './hooks/useCompanionChat';
+import { SIDEBAR_WIDTH } from './config/layout';
+import type { StoryProposal, ChatMessage } from './hooks/useCompanionChat';
+import type { StoryStatus, StorySection } from './hooks/useStoryteller';
+import type { SessionDetail } from './types/session';
+import { AuthScreen } from './components/AuthScreen';
 import './App.css';
+
+/* ── Outlet context type — consumed by page components ── */
+
+export interface AppOutletContext {
+  // Story
+  status: StoryStatus;
+  sections: StorySection[];
+  storyTitle: string | null;
+  currentMusic: string | null;
+  startStory: (prompt: string, companionSessionId?: string) => Promise<void>;
+  stopStory: () => void;
+
+  // Sessions
+  fetchSessions: () => Promise<void>;
+  getSessionDetail: (sessionId: string) => Promise<SessionDetail>;
+
+  // Companion
+  chatMessages: ChatMessage[];
+  chatStreaming: boolean;
+  sendMessage: (text: string) => Promise<void>;
+  clearMessages: () => void;
+  companionSessionId: string | null;
+  proposal: StoryProposal | null;
+  dismissProposal: () => void;
+
+  // Layout
+  isSidebarOpen: boolean;
+}
 
 /* ── Loading spinner shown while Firebase resolves auth state ── */
 function LoadingScreen() {
@@ -39,100 +68,74 @@ const loadingStyles: Record<string, CSSProperties> = {
   text: { fontFamily: "'Cinzel', serif", fontSize: 14, color: '#94a3b8', letterSpacing: '0.12em' },
 };
 
-/* ══════════════════════════════════════════════════════
-   App — gated on authentication
-   ══════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════
+   App — Layout shell with Router outlet
+   ══════════════════════════════════════════════════════════════ */
 
 function App() {
   const { user, loading, signOut, getIdToken } = useAuth();
+  const navigate = useNavigate();
 
   const { sessions, loading: sessionsLoading, fetchSessions, getSessionDetail, deleteSession, renameSession } = useSessions();
 
-  const { status, sections, currentMusic, startStory, stopStory } = useStoryteller({ getIdToken });
+  const { status, sections, storyTitle, currentMusic, startStory, stopStory } = useStoryteller({ getIdToken });
+
+  const {
+    messages: chatMessages,
+    isStreaming: chatStreaming,
+    sendMessage,
+    clearMessages,
+    sessionId: companionSessionId,
+    proposal,
+    dismissProposal,
+  } = useCompanionChat({ getIdToken });
 
   const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [hydratedSections, setHydratedSections] = useState<StorySection[]>([]);
 
+  // ── New story (reset everything) ──────────────────────────────────────────
   const handleNewStory = useCallback(() => {
     stopStory();
-    setActiveSessionId(null);
-    setHydratedSections([]);
-  }, [stopStory]);
+    clearMessages();
+    navigate('/');
+  }, [stopStory, clearMessages, navigate]);
 
-  const handleBeginStory = (prompt: string) => {
-    setActiveSessionId(null);
-    setHydratedSections([]);
-    void startStory(prompt);
-    void fetchSessions();
-  };
-
-  const handleSelectSession = useCallback(async (sessionId: string) => {
+  // ── Session selection → navigate to /story/:id ─────────────────────────────
+  const handleSelectSession = useCallback((sessionId: string) => {
     stopStory();
-    setActiveSessionId(sessionId);
-
-    try {
-      const detail = await getSessionDetail(sessionId);
-      const nextSections: StorySection[] = [];
-
-      for (const interaction of detail.interactions as Interaction[]) {
-        if (interaction.text && interaction.text.trim()) {
-          nextSections.push({ type: 'text', content: interaction.text });
-        }
-
-        if (interaction.role !== 'tool') continue;
-
-        const args = interaction.args ?? {};
-        const imageUrl = typeof args.url === 'string'
-          ? args.url
-          : typeof (args as Record<string, unknown>).image_url === 'string'
-            ? (args as { image_url: string }).image_url
-            : null;
-        const musicUrl = typeof (args as Record<string, unknown>).audio_url === 'string'
-          ? (args as { audio_url: string }).audio_url
-          : (interaction.name?.toLowerCase().includes('music') && typeof args.url === 'string' ? args.url : null);
-
-        if (imageUrl) {
-          nextSections.push({
-            type: 'image',
-            url: imageUrl,
-            caption: typeof (args as Record<string, unknown>).caption === 'string'
-              ? (args as { caption: string }).caption
-              : '',
-          });
-        }
-
-        if (musicUrl) {
-          nextSections.push({
-            type: 'music',
-            url: musicUrl,
-            duration: typeof (args as Record<string, unknown>).duration === 'number'
-              ? (args as { duration: number }).duration
-              : 33,
-          });
-        }
-      }
-
-      setHydratedSections(nextSections);
-    } catch {
-      setHydratedSections([]);
-    }
-  }, [getSessionDetail, stopStory]);
+    navigate(`/story/${sessionId}`);
+  }, [stopStory, navigate]);
 
   const handleSignOut = () => {
     stopStory();
     void signOut();
   };
 
-  const storySections = activeSessionId ? hydratedSections : sections;
-  const showStory = storySections.length > 0;
-  const showPrompt = (status === 'idle' || status === 'error') && !showStory;
-
   /* ── Auth gates ─────────────────────────────────────────── */
   if (loading) return <LoadingScreen />;
   if (!user)   return <AuthScreen />;
 
-  const SIDEBAR_WIDTH = 300;
+  /* ── Outlet context — available to all child pages ──────── */
+  const outletContext: AppOutletContext = {
+    status,
+    sections,
+    storyTitle,
+    currentMusic,
+    startStory,
+    stopStory,
+
+    fetchSessions,
+    getSessionDetail,
+
+    chatMessages,
+    chatStreaming,
+    sendMessage,
+    clearMessages,
+    companionSessionId,
+    proposal,
+    dismissProposal,
+
+    isSidebarOpen,
+  };
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', position: 'relative' }}>
@@ -141,9 +144,9 @@ function App() {
       <SessionSidebar
         sessions={sessions}
         loading={sessionsLoading}
-        activeSessionId={activeSessionId}
+        activeSessionId={null}
         onNewStory={handleNewStory}
-        onSelectSession={(sessionId) => { void handleSelectSession(sessionId); }}
+        onSelectSession={handleSelectSession}
         onDeleteSession={deleteSession}
         onRenameSession={renameSession}
         onSignOut={handleSignOut}
@@ -170,29 +173,13 @@ function App() {
           </div>
         </header>
 
-        {/* Empty state — shown when app loads and no story exists */}
-        {!showStory && status === 'idle' && (
-          <EmptyState />
-        )}
-
-        {/* 3D Book view — shown once content starts arriving */}
-        {showStory && (
-          <BookView sections={storySections} status={status} onClose={handleNewStory} />
-        )}
-
-        {/* Prompt input — shown when idle */}
-        {showPrompt && (
-          <StoryPrompt onSubmit={handleBeginStory} disabled={status !== 'idle'} />
-        )}
+        {/* Child page rendered here */}
+        <Outlet context={outletContext} />
 
         {/* Status badge + stop/new-story controls */}
         <AvatarHUD status={status} onStop={stopStory} onNewStory={handleNewStory} />
       </div>
 
-      <style>{`
-        @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
-        @keyframes pulse-orb { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
-      `}</style>
     </div>
   );
 }

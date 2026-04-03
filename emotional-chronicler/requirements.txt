@@ -22,3 +22,6 @@ firebase-admin>=6.0.0
 
 # Firestore (session memory)
 google-cloud-firestore>=2.19.0
+
+# Google Cloud Storage (persistent image & music asset storage)
+google-cloud-storage>=2.18.0

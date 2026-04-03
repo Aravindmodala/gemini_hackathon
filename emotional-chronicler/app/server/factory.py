@@ -13,12 +13,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.config import PROJECT_ID, LOCATION, STORY_MODEL, IMAGEN_MODEL, PORT, FRONTEND_DIR, FIREBASE_ENABLED
+from app.config import PROJECT_ID, LOCATION, STORY_MODEL, IMAGEN_MODEL, LYRIA_MODEL, PORT, FRONTEND_DIR, FIREBASE_ENABLED
 from app.core.firebase import is_firebase_ready
 from app.server.errors import http_exception_handler, validation_exception_handler
 from app.server.middleware import setup_middleware
 from app.server.routes import router, api_router
 from app.server.session_routes import router as session_router
+from app.server.chat_routes import chat_router
 
 logger = logging.getLogger("chronicler")
 
@@ -40,13 +41,13 @@ def create_app() -> FastAPI:
 
         logger.info("")
         logger.info("📖  The Emotional Chronicler — Creative Storyteller")
-        logger.info(f"   Project:  {PROJECT_ID}")
-        logger.info(f"   Location: {LOCATION}")
-        logger.info(f"   Agent:    {STORY_MODEL}  (ADK)")
-        logger.info(f"   Images:   {IMAGEN_MODEL}  (Imagen 4)")
-        logger.info(f"   Music:    lyria-002  (Lyria 2)")
-        logger.info(f"   Firebase: {firebase_status}")
-        logger.info(f"   Port:     {PORT}")
+        logger.info("   Project:  %s", PROJECT_ID)
+        logger.info("   Location: %s", LOCATION)
+        logger.info("   Agent:    %s  (ADK)", STORY_MODEL)
+        logger.info("   Images:   %s  (Imagen 4)", IMAGEN_MODEL)
+        logger.info("   Music:    %s  (Lyria 2)", LYRIA_MODEL)
+        logger.info("   Firebase: %s", firebase_status)
+        logger.info("   Port:     %s", PORT)
         logger.info("")
         yield
         logger.info("Shutting down...")
@@ -70,5 +71,6 @@ def create_app() -> FastAPI:
     # Versioned API routes
     app.include_router(api_router, prefix="/api/v1")
     app.include_router(session_router, prefix="/api/v1")
+    app.include_router(chat_router, prefix="/api/v1")
 
     return app

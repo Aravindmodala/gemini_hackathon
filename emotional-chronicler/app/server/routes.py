@@ -12,10 +12,8 @@ Routes:
   POST /api/v1/stories          — ADK agent: stream illustrated story (SSE)
 """
 
-import json
+import asyncio
 import logging
-import uuid
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -23,15 +21,22 @@ from google.genai import types as genai_types
 from pydantic import BaseModel, field_validator
 
 from app.config import FRONTEND_DIR, IMAGE_CACHE_DIR, MUSIC_CACHE_DIR
+from app.core.adk_session_manager import ADKSessionManager
 from app.core.agent import runner, APP_NAME
+from app.core.session_query_service import SessionQueryService
 from app.core.store import SessionStore
 from app.server.auth_middleware import get_optional_user
+from app.server.session_resolver import SessionResolver
+from app.server.sse import format_sse_event
 
 logger = logging.getLogger("chronicler")
 
 # ── Two routers ────────────────────────────────────────────────────────────────
 # router:     static assets + SPA (no prefix — registered directly in factory)
 # api_router: versioned story API (factory mounts under /api/v1)
+
+# Flush Elora text to Firestore every ~800 characters to survive interruptions
+ELORA_FLUSH_CHARS = 800
 
 router = APIRouter()
 api_router = APIRouter()
@@ -49,8 +54,9 @@ async def serve_index():
 
 class StoryRequest(BaseModel):
     prompt: str
-    user_id: Optional[str] = None
-    session_id: Optional[str] = None
+    user_id: str | None = None
+    session_id: str | None = None
+    companion_session_id: str | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -98,24 +104,13 @@ async def generate_story(request: StoryRequest, http_request: Request):
     auth_user = await get_optional_user(http_request)
     is_authenticated = bool(auth_user)
 
-    if is_authenticated:
-        user_id = auth_user["uid"]
-        store = SessionStore(user_id)
-        if request.session_id:
-            resumed = store.resume_session(request.session_id)
-            if resumed:
-                session_id = request.session_id
-                session_decision = "resume"
-            else:
-                session_id = store.create_session()
-                session_decision = "resume_miss_create"
-        else:
-            session_id = store.create_session()
-            session_decision = "create"
-    else:
-        user_id = request.user_id or "anonymous"
-        session_id = request.session_id or uuid.uuid4().hex
-        session_decision = "anonymous_passthrough"
+    resolver = SessionResolver()
+    user_id, session_id, store = await resolver.resolve(
+        auth_user=auth_user,
+        requested_session_id=request.session_id,
+        session_title="Untitled Story",
+        fallback_user_id=request.user_id or "anonymous",
+    )
 
     logger.info(
         "[Story] resolved_user user_id=%s auth=%s",
@@ -123,48 +118,61 @@ async def generate_story(request: StoryRequest, http_request: Request):
         is_authenticated,
     )
     logger.info(
-        "[Story] resolved_session session_id=%s decision=%s",
+        "[Story] resolved_session session_id=%s",
         session_id,
-        session_decision,
     )
 
     async def event_stream():
+        elora_text_buffer: list[str] = []
+        elora_buffered_chars: int = 0
         try:
             logger.info(
-                "[Story] stream_start user_id=%s session_id=%s decision=%s",
+                "[Story] stream_start user_id=%s session_id=%s",
                 user_id,
                 session_id,
-                session_decision,
             )
-            yield _sse({"type": "session", "session_id": session_id})
+            yield format_sse_event({"type": "session", "session_id": session_id})
 
             # Ensure ADK session exists
-            existing = await runner.session_service.get_session(
-                app_name=APP_NAME,
-                user_id=user_id,
-                session_id=session_id,
-            )
-            if not existing:
-                logger.info(
-                    "[Story] adk_session_create user_id=%s session_id=%s",
-                    user_id,
-                    session_id,
+            adk_manager = ADKSessionManager(runner, APP_NAME)
+            await adk_manager.ensure_session_exists(user_id, session_id)
+
+            # Load companion context if available
+            prompt_text = request.prompt
+            if request.companion_session_id and is_authenticated:
+                companion_store = SessionStore(user_id)
+                resumed = await asyncio.to_thread(
+                    companion_store.resume_session, request.companion_session_id
                 )
-                await runner.session_service.create_session(
-                    app_name=APP_NAME,
-                    user_id=user_id,
-                    session_id=session_id,
-                )
-            else:
-                logger.info(
-                    "[Story] adk_session_resume user_id=%s session_id=%s",
-                    user_id,
-                    session_id,
-                )
+                if resumed:
+                    companion_context, proposed_title, proposed_brief = await asyncio.to_thread(
+                        companion_store.get_companion_data
+                    )
+                    if companion_context:
+                        prompt_text = f"{companion_context}\n\nThe traveler is ready. Begin the story now.\n\nOriginal prompt: {request.prompt}"
+                        logger.info(
+                            "[Story] companion_context_loaded session_id=%s",
+                            request.companion_session_id,
+                        )
+                        # Update story session title from companion's proposal
+                        if proposed_title:
+                            if store:
+                                await asyncio.to_thread(
+                                    SessionQueryService.update_session_title,
+                                    user_id,
+                                    session_id,
+                                    proposed_title,
+                                )
+                                logger.info("[Story] session_title_set title=%s", proposed_title)
+                            yield format_sse_event({"type": "title", "title": proposed_title, "brief": proposed_brief or ""})
+
+            # Log the user's prompt to Firestore
+            if store:
+                await asyncio.to_thread(store.log_interaction, "user", request.prompt)
 
             new_message = genai_types.Content(
                 role="user",
-                parts=[genai_types.Part(text=request.prompt)],
+                parts=[genai_types.Part(text=prompt_text)],
             )
 
             async for event in runner.run_async(
@@ -178,7 +186,14 @@ async def generate_story(request: StoryRequest, http_request: Request):
                 for part in event.content.parts:
                     # ── Text chunk ────────────────────────────
                     if part.text:
-                        yield _sse({"type": "text", "chunk": part.text})
+                        yield format_sse_event({"type": "text", "chunk": part.text})
+                        elora_text_buffer.append(part.text)
+                        elora_buffered_chars += len(part.text)
+                        # Flush to Firestore periodically so content survives interruptions
+                        if store and elora_buffered_chars >= ELORA_FLUSH_CHARS:
+                            await asyncio.to_thread(store.log_interaction, "elora", "".join(elora_text_buffer))
+                            elora_text_buffer.clear()
+                            elora_buffered_chars = 0
 
                     # ── Tool response (image or music) ────────
                     elif part.function_response:
@@ -192,27 +207,47 @@ async def generate_story(request: StoryRequest, http_request: Request):
                             continue
 
                         if fn_name == "generate_image" and "image_url" in result:
-                            yield _sse({
+                            yield format_sse_event({
                                 "type": "image",
                                 "url": result["image_url"],
                                 "caption": result.get("caption", ""),
                             })
+                            # Log image tool call to Firestore
+                            if store:
+                                await asyncio.to_thread(store.log_tool_call, fn_name, result)
 
                         elif fn_name == "generate_music" and "audio_url" in result:
-                            yield _sse({
+                            yield format_sse_event({
                                 "type": "music",
                                 "url": result["audio_url"],
                                 "duration": result.get("duration_seconds", 33),
                             })
+                            # Log music tool call to Firestore
+                            if store:
+                                await asyncio.to_thread(store.log_tool_call, fn_name, result)
+
+            # Flush accumulated Elora text to Firestore
+            if store and elora_text_buffer:
+                await asyncio.to_thread(store.log_interaction, "elora", "".join(elora_text_buffer))
+
+            # Mark session as ended
+            if store:
+                await asyncio.to_thread(store.end_session)
 
             logger.info(
                 "[Story] stream_complete user_id=%s session_id=%s",
                 user_id,
                 session_id,
             )
-            yield _sse({"type": "done"})
+            yield format_sse_event({"type": "done"})
 
         except Exception as e:
+            # Still flush whatever text we have and end the session
+            if store:
+                if elora_text_buffer:
+                    await asyncio.to_thread(store.log_interaction, "elora", "".join(elora_text_buffer))
+                await asyncio.to_thread(store.end_session)
+
             logger.exception(
                 "[Story] stream_failure user_id=%s session_id=%s error=%s",
                 user_id,
@@ -220,7 +255,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                 e,
             )
             # Generic message to avoid leaking internal details to clients
-            yield _sse({"type": "error", "message": "Story generation failed. Please try again."})
+            yield format_sse_event({"type": "error", "message": "Story generation failed. Please try again."})
 
 
     return StreamingResponse(
@@ -232,11 +267,6 @@ async def generate_story(request: StoryRequest, http_request: Request):
             "Location": f"/api/v1/sessions/{session_id}",
         },
     )
-
-
-def _sse(payload: dict) -> str:
-    """Format a dict as a Server-Sent Events data line."""
-    return f"data: {json.dumps(payload)}\n\n"
 
 
 # ── Static asset serving ──────────────────────────────────────────────────────

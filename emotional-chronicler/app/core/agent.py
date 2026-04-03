@@ -2,15 +2,12 @@
 """
 ADK Elora agent — Creative Storyteller.
 
-Defines the Google ADK Agent and Runner for illustrated story generation.
-The agent uses gemini-3.1-pro-preview as its reasoning model and has two tools:
-  - generate_image  → Imagen 4 scene illustrations
-  - generate_music  → Lyria 2 background music tracks
+Defines two ADK Agents:
+  1. elora_agent      (Gemini 3.1 Pro) — story generation with image + music tools
+  2. companion_agent  (Gemini 2.0 Flash) — pre-story conversation to capture mood/emotions
 
-Usage:
-    from app.core.agent import runner, APP_NAME
-    async for event in runner.run_async(user_id=..., session_id=..., new_message=...):
-        ...
+The companion captures context BEFORE story generation, then all its interactions
+are forwarded to elora_agent so stories are emotionally tailored.
 """
 
 import logging
@@ -19,8 +16,9 @@ from google.adk.agents import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 
-from app.config import STORY_MODEL
+from app.config import STORY_MODEL, COMPANION_MODEL
 from app.prompts import ELORA_SYSTEM_PROMPT
+from app.prompts.companion import COMPANION_SYSTEM_PROMPT
 from app.tools.imagen import generate_image
 from app.tools.lyria import generate_music
 
@@ -28,7 +26,7 @@ logger = logging.getLogger("chronicler")
 
 APP_NAME = "emotional_chronicler"
 
-# ── Agent definition ──────────────────────────────────────────────────────────
+# ── Story agent (Gemini 3.1 Pro Preview) ──────────────────────────────────────
 
 elora_agent = Agent(
     name="elora",
@@ -42,9 +40,7 @@ elora_agent = Agent(
     tools=[generate_image, generate_music],
 )
 
-# ── Runner + session service ──────────────────────────────────────────────────
-# InMemorySessionService is used here. For production, swap with a
-# Firestore-backed session service to persist across restarts.
+# ── Session service (shared by both agents) ───────────────────────────────────
 
 _session_service = InMemorySessionService()
 
@@ -54,4 +50,27 @@ runner = Runner(
     session_service=_session_service,
 )
 
-logger.info(f"[Agent] Elora ADK agent ready — model: {STORY_MODEL}")
+# ── Pre-story companion agent (Gemini 2.0 Flash) ─────────────────────────────
+# Chats with the user before story generation to capture emotions, mood, and
+# preferences. No tools — conversational only.
+
+companion_agent = Agent(
+    name="elora_companion",
+    model=COMPANION_MODEL,
+    description=(
+        "Elora in companion mode — chats with the traveler before their story "
+        "begins to understand their emotions, mood, and what kind of story "
+        "would resonate with them."
+    ),
+    instruction=COMPANION_SYSTEM_PROMPT,
+    tools=[],
+)
+
+companion_runner = Runner(
+    agent=companion_agent,
+    app_name=APP_NAME,
+    session_service=_session_service,
+)
+
+logger.info("[Agent] Elora story agent ready — model: %s", STORY_MODEL)
+logger.info("[Agent] Elora companion ready — model: %s", COMPANION_MODEL)

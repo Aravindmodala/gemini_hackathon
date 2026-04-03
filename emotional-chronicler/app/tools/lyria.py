@@ -3,6 +3,7 @@ Lyria — AI music generation tool for storytelling.
 
 Generates instrumental music tracks from text prompts using
 Google's Lyria 2 model on Vertex AI.
+Saves audio to Google Cloud Storage for persistent access.
 
 API Reference:
   https://cloud.google.com/vertex-ai/generative-ai/docs/music/generate-music
@@ -16,7 +17,7 @@ import google.auth
 import google.auth.transport.requests
 import httpx
 
-from app.config import PROJECT_ID, LOCATION, MUSIC_CACHE_DIR, LYRIA_MODEL
+from app.config import PROJECT_ID, LOCATION, MUSIC_CACHE_DIR, LYRIA_MODEL, upload_to_gcs
 
 logger = logging.getLogger("chronicler")
 
@@ -45,7 +46,7 @@ async def generate_music(
 
     Returns:
         dict with keys:
-            audio_url: Relative URL path to the saved audio (e.g. /api/music/abc.wav).
+            audio_url: URL to the saved audio (GCS public URL or local fallback).
             duration_seconds: Approximate track duration.
             description: The prompt used to generate the music.
             error: Present only if generation failed.
@@ -93,13 +94,23 @@ async def generate_music(
         ext = "wav" if "wav" in mime_type else "mp3"
 
         filename = f"{uuid.uuid4().hex}.{ext}"
+
+        # Save to local cache (fast serving during current session)
         filepath = MUSIC_CACHE_DIR / filename
         filepath.write_bytes(audio_bytes)
 
-        logger.info("[Lyria] Saved %s (%s bytes)", filename, f"{len(audio_bytes):,}")
+        # Upload to GCS (persistent storage)
+        content_type = "audio/wav" if ext == "wav" else "audio/mpeg"
+        try:
+            gcs_url = upload_to_gcs(f"music/{filename}", audio_bytes, content_type)
+            logger.info("[Lyria] Uploaded to GCS: %s (%s bytes)", filename, f"{len(audio_bytes):,}")
+            audio_url = gcs_url
+        except Exception as gcs_err:
+            logger.warning("[Lyria] GCS upload failed, falling back to local: %s", gcs_err)
+            audio_url = f"/api/music/{filename}"
 
         return {
-            "audio_url": f"/api/music/{filename}",
+            "audio_url": audio_url,
             "duration_seconds": LYRIA_TRACK_DURATION_SECONDS,
             "description": prompt,
         }
