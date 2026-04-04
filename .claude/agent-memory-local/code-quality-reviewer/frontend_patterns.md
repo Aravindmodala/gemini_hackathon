@@ -81,3 +81,19 @@ Key conventions and known issues in the frontend codebase. Issues marked RESOLVE
 ---
 
 **REMAINING — index.html Google Fonts link is incomplete:** `index.html` now loads `Playfair Display` and `Cinzel` via `<link>` (correct). However, `App.css` line 7 still has a duplicate `@import url(...)` for `Cinzel` and `Inter` from Google Fonts. Both the HTML `<link>` and the CSS `@import` will fire, resulting in two separate HTTP requests for font data on page load. The CSS `@import` in App.css should be removed in favor of the HTML link, OR the HTML link should be extended to also include Inter (currently missing from the `<link>` tag).
+
+---
+
+**REMAINING — StoryPage.tsx hardcodes SIDEBAR_WIDTH as 300:** Line 92 of StoryPage.tsx computes `const sidebarOffset = isSidebarOpen ? 300 : 0` instead of importing `SIDEBAR_WIDTH` from `src/config/layout.ts`. This is the same DRY violation as SessionSidebar.tsx.
+
+---
+
+**REMAINING — StoryChatbot.tsx is a stub with no backend integration:** The chatbot silently drops user messages into local state with a `// TODO: integrate with backend chat API` comment. A message appears to be sent but the bot never responds. This is intentional scaffolding but must be completed before the feature is usable. No bot response or loading indicator is shown after the user sends a message.
+
+---
+
+**PATTERN — bentoCard::before ambient glow line is the same as CompanionChat panel::before:** Both use identical `linear-gradient(90deg, transparent, rgba(167,139,250,0.5), transparent)` on a 1px-high absolute element. This is a strong candidate for a shared utility class.
+
+---
+
+**PATTERN — StoryChatbot.module.css input/sendBtn/hint/inputRow rules are byte-for-byte copies of CompanionChat.module.css:** The five rule blocks are identical. A shared base CSS file (e.g. `ChatInput.module.css`) should be created if the project grows beyond two chat surfaces.

@@ -62,7 +62,7 @@ export function StoryPage() {
           // generate_music stores: { audio_url: "...", duration_seconds: 33 }
           const musicUrl = musArgs.audio_url ?? musArgs.url ?? null;
 
-          if (interaction.name === 'generate_image' && imageUrl) {
+          if ((interaction.name === 'generate_image' || interaction.name === 'inline_image') && imageUrl) {
             nextSections.push({
               type: 'image',
               url: resolveAssetUrl(imageUrl),

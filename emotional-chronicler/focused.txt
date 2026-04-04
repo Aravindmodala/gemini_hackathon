@@ -1,0 +1,73 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.5, pytest-8.4.2, pluggy-1.6.0 -- C:\Python313\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\aravi\OneDrive\Documentos\gemini storyteller\emotional-chronicler
+configfile: pytest.ini
+plugins: anyio-4.12.0, langsmith-0.3.45, asyncio-1.2.0, cov-7.0.0, mock-3.14.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 54 items
+
+tests/test_agent.py::TestStoryAgentSetup::test_app_name_is_emotional_chronicler PASSED [  1%]
+tests/test_agent.py::TestStoryAgentSetup::test_elora_agent_name_is_elora PASSED [  3%]
+tests/test_agent.py::TestStoryAgentSetup::test_agent_tools_are_empty PASSED [  5%]
+tests/test_agent.py::TestStoryAgentSetup::test_agent_has_generate_content_config PASSED [  7%]
+tests/test_agent.py::TestStoryAgentSetup::test_runner_is_created_with_correct_app_name PASSED [  9%]
+tests/test_agent.py::TestStoryAgentSetup::test_runner_module_exports_runner PASSED [ 11%]
+tests/test_agent.py::TestStoryAgentSetup::test_agent_uses_story_model PASSED [ 12%]
+tests/test_agent.py::TestStoryAgentSetup::test_agent_has_system_instruction PASSED [ 14%]
+tests/test_agent.py::TestStoryAgentSetup::test_runner_uses_in_memory_session_service PASSED [ 16%]
+tests/test_agent.py::TestCompanionAgentSetup::test_companion_agent_exists PASSED [ 18%]
+tests/test_agent.py::TestCompanionAgentSetup::test_companion_runner_exists PASSED [ 20%]
+tests/test_agent.py::TestCompanionAgentSetup::test_companion_agent_uses_companion_model PASSED [ 22%]
+tests/test_agent.py::TestCompanionAgentSetup::test_companion_agent_has_no_tools PASSED [ 24%]
+tests/test_agent.py::TestCompanionAgentSetup::test_companion_agent_name_is_elora_companion PASSED [ 25%]
+tests/test_agent.py::TestAgentToolFunctions::test_generate_music_is_async_function PASSED [ 27%]
+tests/test_e2e_flow.py::TestE2EStoryFlow::test_full_story_with_text_and_images FAILED [ 29%]
+tests/test_e2e_flow.py::TestE2EStoryFlow::test_gcs_failure_falls_back_to_local_url PASSED [ 31%]
+tests/test_e2e_flow.py::TestE2EStoryFlow::test_oversized_image_is_skipped PASSED [ 33%]
+tests/test_e2e_flow.py::TestE2EStoryFlow::test_thinking_events_emitted_during_slow_generation PASSED [ 35%]
+tests/test_e2e_flow.py::TestE2EStoryFlow::test_firestore_flush_during_long_text PASSED [ 37%]
+tests/test_e2e_flow.py::TestE2EStoryFlow::test_error_during_generation_sends_error_event PASSED [ 38%]
+tests/test_e2e_flow.py::TestE2EStoryFlow::test_mixed_text_images_music_flow PASSED [ 40%]
+tests/test_e2e_flow.py::TestE2EStoryFlow::test_companion_context_injected_into_story PASSED [ 42%]
+tests/test_e2e_flow.py::TestSystemPromptContent::test_prompt_contains_genre_adaptivity PASSED [ 44%]
+tests/test_e2e_flow.py::TestSystemPromptContent::test_prompt_requires_minimum_images PASSED [ 46%]
+tests/test_e2e_flow.py::TestSystemPromptContent::test_prompt_forbids_questions PASSED [ 48%]
+tests/test_e2e_flow.py::TestSystemPromptContent::test_prompt_requires_2000_word_minimum PASSED [ 50%]
+tests/test_e2e_flow.py::TestSystemPromptContent::test_prompt_mentions_comic_book_style PASSED [ 51%]
+tests/test_e2e_flow.py::TestSystemPromptContent::test_prompt_art_style_matches_genre PASSED [ 53%]
+tests/test_routes.py::TestSseHelper::test_sse_formats_payload_as_data_line PASSED [ 55%]
+tests/test_routes.py::TestSseHelper::test_sse_handles_nested_objects PASSED [ 57%]
+tests/test_routes.py::TestServeIndex::test_get_root_returns_non_404 PASSED [ 59%]
+tests/test_routes.py::TestGenerateStory::test_story_streams_text_events PASSED [ 61%]
+tests/test_routes.py::TestGenerateStory::test_story_streams_inline_image_event PASSED [ 62%]
+tests/test_routes.py::TestGenerateStory::test_story_streams_music_event PASSED [ 64%]
+tests/test_routes.py::TestGenerateStory::test_story_ends_with_done_event PASSED [ 66%]
+tests/test_routes.py::TestGenerateStory::test_story_skips_empty_events PASSED [ 68%]
+tests/test_routes.py::TestGenerateStory::test_story_skips_tool_error_responses PASSED [ 70%]
+tests/test_routes.py::TestGenerateStory::test_story_returns_error_event_on_exception PASSED [ 72%]
+tests/test_routes.py::TestGenerateStory::test_story_sse_emits_session_event_first PASSED [ 74%]
+tests/test_routes.py::TestGenerateStory::test_story_auth_uses_header_user_id_as_canonical PASSED [ 75%]
+tests/test_routes.py::TestGenerateStory::test_story_auth_creates_session_when_missing_session_id PASSED [ 77%]
+tests/test_routes.py::TestGenerateStory::test_story_auth_resumes_session_when_session_id_provided PASSED [ 79%]
+tests/test_routes.py::TestGenerateStory::test_story_uses_provided_user_id PASSED [ 81%]
+tests/test_routes.py::TestGenerateStory::test_story_defaults_to_anonymous_user PASSED [ 83%]
+tests/test_routes.py::TestGenerateStory::test_story_creates_session_when_not_existing PASSED [ 85%]
+tests/test_routes.py::TestGenerateStory::test_story_skips_create_when_session_exists PASSED [ 87%]
+tests/test_routes.py::TestGenerateStory::test_story_missing_prompt_returns_422 PASSED [ 88%]
+tests/test_routes.py::TestGenerateStory::test_story_has_correct_sse_headers PASSED [ 90%]
+tests/test_routes.py::TestServeImage::test_serve_image_returns_404_when_not_found PASSED [ 92%]
+tests/test_routes.py::TestServeImage::test_serve_image_returns_file_when_exists PASSED [ 94%]
+tests/test_routes.py::TestServeMusic::test_serve_music_returns_404_when_not_found PASSED [ 96%]
+tests/test_routes.py::TestServeMusic::test_serve_wav_returns_audio_wav_content_type PASSED [ 98%]
+tests/test_routes.py::TestServeMusic::test_serve_mp3_returns_audio_mpeg_content_type PASSED [100%]
+
+================================== FAILURES ===================================
+____________ TestE2EStoryFlow.test_full_story_with_text_and_images ____________
+tests\test_e2e_flow.py:144: in test_full_story_with_text_and_images
+    assert len(text_events) == 4
+E   AssertionError: assert 5 == 4
+E    +  where 5 = len([{'chunk': 'Chapter 1: The Beginning\n\n', 'type': 'text'}, {'chunk': 'The rain fell heavy on the cobblestone streets of Oakhaven. ', 'type': 'text'}, {'chunk': 'Kaelen wiped the counter of the midnight diner. ', 'type': 'text'}, {'chunk': 'His hands trembled ? not from cold, but from holding back. ', 'type': 'text'}, {'chunk': 'The end.', 'type': 'text'}])
+=========================== short test summary info ===========================
+FAILED tests/test_e2e_flow.py::TestE2EStoryFlow::test_full_story_with_text_and_images
+======================== 1 failed, 53 passed in 8.08s =========================

@@ -1,4 +1,3 @@
-from .imagen import generate_image
-from .lyria import generate_music
-
-__all__ = ["generate_image", "generate_music"]
+# Tools package — currently empty.
+# Image generation is handled natively by Gemini 3 Pro Image Preview.
+# Music generation (Lyria 2) will be re-added when needed.

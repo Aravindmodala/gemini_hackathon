@@ -40,9 +40,11 @@ async def client(test_app):
 
 def _make_text_event(text: str) -> MagicMock:
     """Create a mock ADK event with a text part."""
-    part = MagicMock()
+    part = MagicMock(spec=[])
     part.text = text
+    part.thought = False
     part.function_response = None
+    part.inline_data = None
     event = MagicMock()
     event.content = MagicMock()
     event.content.parts = [part]
@@ -55,36 +57,43 @@ def _make_image_event(image_url: str, caption: str) -> MagicMock:
     fn_resp.name = "generate_image"
     fn_resp.response = {"image_url": image_url, "caption": caption}
 
-    part = MagicMock()
+    part = MagicMock(spec=[])
     part.text = None
+    part.thought = False
     part.function_response = fn_resp
+    part.inline_data = None
 
     event = MagicMock()
     event.content = MagicMock()
     event.content.parts = [part]
     return event
 
-
-def _make_music_event(audio_url: str, duration: int = 33) -> MagicMock:
-    """Create a mock ADK event with a function_response for generate_music."""
-    fn_resp = MagicMock()
-    fn_resp.name = "generate_music"
-    fn_resp.response = {"audio_url": audio_url, "duration_seconds": duration}
-
-    part = MagicMock()
-    part.text = None
-    part.function_response = fn_resp
-
-    event = MagicMock()
-    event.content = MagicMock()
-    event.content.parts = [part]
-    return event
 
 
 def _make_empty_event() -> MagicMock:
     """Create a mock ADK event with no content."""
-    event = MagicMock()
+    event = MagicMock(spec=[])
     event.content = None
+    return event
+
+
+def _make_inline_image_event(image_bytes: bytes = b"\x89PNG\r\n\x1a\n", mime_type: str = "image/png") -> MagicMock:
+    """Create a mock ADK event with native inline_data (Gemini 3 Pro Image Preview)."""
+    inline_data = MagicMock()
+    inline_data.data = image_bytes
+    inline_data.mime_type = mime_type
+
+    part = MagicMock()
+    part.text = None
+    part.thought = False
+    part.function_response = None
+    part.inline_data = inline_data
+    # Make hasattr(part, 'inline_data') return True
+    type(part).inline_data = inline_data
+
+    event = MagicMock()
+    event.content = MagicMock()
+    event.content.parts = [part]
     return event
 
 
@@ -160,12 +169,14 @@ class TestGenerateStory:
         assert text_events[1]["chunk"] == " in a land far away"
 
     @pytest.mark.asyncio
-    async def test_story_streams_image_event(self, client):
-        """generate_image tool response → image SSE event."""
+    async def test_story_streams_inline_image_event(self, client, tmp_path):
+        """Native inline image from Gemini 3 Pro → image SSE event with GCS fallback."""
         async def mock_run_async(**kwargs):
-            yield _make_image_event("/api/images/abc.png", "A dragon flies")
+            yield _make_inline_image_event()
 
-        with patch("app.server.routes.runner") as mock_runner:
+        with patch("app.server.routes.runner") as mock_runner, \
+             patch("app.server.routes.IMAGE_CACHE_DIR", tmp_path), \
+             patch("app.server.routes.upload_to_gcs", side_effect=Exception("GCS unavailable")):
             mock_runner.session_service.get_session = AsyncMock(return_value=None)
             mock_runner.session_service.create_session = AsyncMock()
             mock_runner.run_async = mock_run_async
@@ -178,30 +189,9 @@ class TestGenerateStory:
         events = await self._sse_lines(response)
         image_events = [e for e in events if e.get("type") == "image"]
         assert len(image_events) == 1
-        assert image_events[0]["url"] == "/api/images/abc.png"
-        assert image_events[0]["caption"] == "A dragon flies"
+        assert "/api/v1/assets/images/" in image_events[0]["url"]
+        assert image_events[0]["url"].endswith(".png")
 
-    @pytest.mark.asyncio
-    async def test_story_streams_music_event(self, client):
-        """generate_music tool response → music SSE event."""
-        async def mock_run_async(**kwargs):
-            yield _make_music_event("/api/music/xyz.wav", 33)
-
-        with patch("app.server.routes.runner") as mock_runner:
-            mock_runner.session_service.get_session = AsyncMock(return_value=None)
-            mock_runner.session_service.create_session = AsyncMock()
-            mock_runner.run_async = mock_run_async
-
-            response = await client.post(
-                "/api/v1/stories",
-                json={"prompt": "A story with music"},
-            )
-
-        events = await self._sse_lines(response)
-        music_events = [e for e in events if e.get("type") == "music"]
-        assert len(music_events) == 1
-        assert music_events[0]["url"] == "/api/music/xyz.wav"
-        assert music_events[0]["duration"] == 33
 
     @pytest.mark.asyncio
     async def test_story_ends_with_done_event(self, client):
@@ -251,9 +241,11 @@ class TestGenerateStory:
         fn_resp.name = "generate_image"
         fn_resp.response = {"error": "Imagen quota exceeded"}
 
-        part = MagicMock()
+        part = MagicMock(spec=[])
         part.text = None
+        part.thought = False
         part.function_response = fn_resp
+        part.inline_data = None
 
         event = MagicMock()
         event.content = MagicMock()
@@ -528,35 +520,68 @@ class TestServeImage:
         assert "image/png" in response.headers["content-type"]
 
 
-# ── GET /api/music/{filename} ─────────────────────────────────────────────────
+# ── GET /api/v1/assets/images/{session_id}/{filename} ───��────────────────────
 
-class TestServeMusic:
+class TestServeAssetImage:
     @pytest.mark.asyncio
-    async def test_serve_music_returns_404_when_not_found(self, client):
-        """Non-existent music file → 404."""
-        response = await client.get("/api/music/nonexistent.wav")
+    async def test_asset_image_serves_local_cache_first(self, client, tmp_path):
+        """Local cache hit → serve directly without signed URL."""
+        filename = "abcdef01234567890abcdef012345678.png"
+        img_file = tmp_path / filename
+        img_file.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        session_id = "abcdef01234567890abcdef012345678"
+        with patch("app.server.routes.IMAGE_CACHE_DIR", tmp_path):
+            response = await client.get(
+                f"/api/v1/assets/images/{session_id}/{filename}",
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 200
+        assert "image/png" in response.headers["content-type"]
+
+    @pytest.mark.asyncio
+    async def test_asset_image_redirects_to_signed_url(self, client, tmp_path):
+        """No local cache → 302 redirect to signed GCS URL."""
+        session_id = "abcdef01234567890abcdef012345678"
+        filename = "abcdef01234567890abcdef012345678.png"
+        signed = "https://storage.googleapis.com/signed-url-here"
+
+        with patch("app.server.routes.IMAGE_CACHE_DIR", tmp_path), \
+             patch("app.server.routes.generate_signed_url", return_value=signed):
+            response = await client.get(
+                f"/api/v1/assets/images/{session_id}/{filename}",
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == signed
+
+    @pytest.mark.asyncio
+    async def test_asset_image_rejects_invalid_session_id(self, client):
+        """Non-hex session_id → 400."""
+        session_id = "not-a-valid-hex-id!!"
+        response = await client.get(f"/api/v1/assets/images/{session_id}/abcdef01234567890abcdef012345678.png")
+        assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_asset_image_rejects_invalid_filename(self, client):
+        """Invalid filename format → 400."""
+        session_id = "abcdef01234567890abcdef012345678"
+        response = await client.get(f"/api/v1/assets/images/{session_id}/not-valid-filename.exe")
+        assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_asset_image_returns_404_on_signed_url_failure(self, client, tmp_path):
+        """GCS signed URL generation failure → 404."""
+        session_id = "abcdef01234567890abcdef012345678"
+        filename = "abcdef01234567890abcdef012345678.png"
+
+        with patch("app.server.routes.IMAGE_CACHE_DIR", tmp_path), \
+             patch("app.server.routes.generate_signed_url", side_effect=Exception("GCS error")):
+            response = await client.get(
+                f"/api/v1/assets/images/{session_id}/{filename}",
+                follow_redirects=False,
+            )
+
         assert response.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_serve_wav_returns_audio_wav_content_type(self, client, tmp_path):
-        """Existing WAV → served with audio/wav content-type."""
-        wav_file = tmp_path / "test.wav"
-        wav_file.write_bytes(b"RIFF")  # WAV magic
-
-        with patch("app.server.routes.MUSIC_CACHE_DIR", tmp_path):
-            response = await client.get("/api/music/test.wav")
-
-        assert response.status_code == 200
-        assert "audio/wav" in response.headers["content-type"]
-
-    @pytest.mark.asyncio
-    async def test_serve_mp3_returns_audio_mpeg_content_type(self, client, tmp_path):
-        """Existing MP3 → served with audio/mpeg content-type."""
-        mp3_file = tmp_path / "test.mp3"
-        mp3_file.write_bytes(b"\xff\xfb")  # MP3 magic
-
-        with patch("app.server.routes.MUSIC_CACHE_DIR", tmp_path):
-            response = await client.get("/api/music/test.mp3")
-
-        assert response.status_code == 200
-        assert "audio/mpeg" in response.headers["content-type"]

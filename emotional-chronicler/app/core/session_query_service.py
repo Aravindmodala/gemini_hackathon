@@ -9,9 +9,32 @@ from datetime import datetime, timezone
 
 from google.cloud import firestore
 
+from app.config import GCS_BUCKET
 from app.core.store import _get_db, _safe_iso, _session_doc_ref, _get_preview
 
 logger = logging.getLogger("chronicler")
+
+# Old GCS public URL prefix used before the signed-URL migration.
+_OLD_GCS_PREFIX = f"https://storage.googleapis.com/{GCS_BUCKET}/"
+
+
+def _rewrite_legacy_image_urls(interactions: list[dict]) -> list[dict]:
+    """Rewrite old-format GCS public URLs to the new asset endpoint paths.
+
+    Old format: https://storage.googleapis.com/{bucket}/images/{session_id}/{file}
+    New format: /api/v1/assets/images/{session_id}/{file}
+    """
+    for interaction in interactions:
+        if interaction.get("role") != "tool":
+            continue
+        if interaction.get("name") not in ("inline_image", "generate_image"):
+            continue
+        args = interaction.get("args", {})
+        url = args.get("image_url", "")
+        if url.startswith(_OLD_GCS_PREFIX):
+            blob_path = url[len(_OLD_GCS_PREFIX):]
+            args["image_url"] = f"/api/v1/assets/{blob_path}"
+    return interactions
 
 
 class SessionQueryService:
@@ -86,13 +109,14 @@ class SessionQueryService:
             if not doc.exists:
                 return None
             data = doc.to_dict()
+            interactions = _rewrite_legacy_image_urls(data.get("interactions", []))
             return {
                 "session_id": doc.id,
                 "title": data.get("title", "Untitled Story"),
                 "status": data.get("status", "unknown"),
                 "created_at": _safe_iso(data.get("created_at")),
                 "updated_at": _safe_iso(data.get("updated_at")),
-                "interactions": data.get("interactions", []),
+                "interactions": interactions,
             }
         except Exception as e:
             logger.warning("[SessionQuery] Failed to get session: %s", e)
