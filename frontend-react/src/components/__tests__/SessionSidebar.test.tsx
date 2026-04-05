@@ -117,6 +117,18 @@ describe('SessionSidebar', () => {
       expect(screen.getByText('Untitled Story')).toBeInTheDocument();
     });
 
+    it('updates a session row title on rerender', () => {
+      const initial = [makeSession({ session_id: 's1', title: '' })];
+      const { rerender } = render(<SessionSidebar {...defaultProps} sessions={initial} />);
+
+      expect(screen.getByText('Untitled Story')).toBeInTheDocument();
+
+      const updated = [makeSession({ session_id: 's1', title: 'Mosquito Man Rising' })];
+      rerender(<SessionSidebar {...defaultProps} sessions={updated} />);
+
+      expect(screen.getByText('Mosquito Man Rising')).toBeInTheDocument();
+    });
+
     it('should render session preview text', () => {
       const sessions = [makeSession({ session_id: 's1', preview: 'A dark forest...' })];
       render(<SessionSidebar {...defaultProps} sessions={sessions} />);

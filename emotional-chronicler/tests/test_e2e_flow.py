@@ -130,8 +130,9 @@ class TestE2EStoryFlow:
         assert len(text_events) == 5
         assert len(image_events) == 2
 
-        # First image should use GCS URL (successful upload)
-        assert image_events[0]["url"] == mock_gcs_url
+        # Images are always served through the asset endpoint, even after successful upload.
+        assert image_events[0]["url"].startswith("/api/v1/assets/images/")
+        assert image_events[0]["url"].endswith(".png")
 
         # Images should have been saved to local cache too
         cached_files = list(tmp_path.glob("*"))
@@ -145,7 +146,7 @@ class TestE2EStoryFlow:
 
     @pytest.mark.asyncio
     async def test_gcs_failure_falls_back_to_local_url(self, client, tmp_path):
-        """When GCS upload fails, image URL falls back to local /api/images/ path."""
+        """When GCS upload fails, image URL falls back to /api/v1/assets/images/ path."""
         async def mock_run_async(**kwargs):
             yield _make_event(_make_inline_image_part())
 
@@ -164,7 +165,7 @@ class TestE2EStoryFlow:
         events = _parse_sse_events(response.text)
         image_events = [e for e in events if e.get("type") == "image"]
         assert len(image_events) == 1
-        assert image_events[0]["url"].startswith("/api/images/")
+        assert image_events[0]["url"].startswith("/api/v1/assets/images/")
         assert image_events[0]["url"].endswith(".png")
 
     @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { AvatarHUD } from './components/layout/AvatarHUD';
@@ -75,9 +75,17 @@ function App() {
   const { user, loading, signOut, getIdToken } = useAuth();
   const navigate = useNavigate();
 
-  const { sessions, loading: sessionsLoading, fetchSessions, getSessionDetail, deleteSession, renameSession } = useSessions();
+  const {
+    sessions,
+    loading: sessionsLoading,
+    fetchSessions,
+    getSessionDetail,
+    deleteSession,
+    renameSession,
+    updateSessionInState,
+  } = useSessions();
 
-  const { status, sections, storyTitle, currentMusic, startStory, stopStory } = useStoryteller({ getIdToken });
+  const { status, sections, storyTitle, currentMusic, sessionId, startStory, stopStory } = useStoryteller({ getIdToken });
 
   const {
     messages: chatMessages,
@@ -92,6 +100,40 @@ function App() {
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const location = useLocation();
   const isStoryPage = location.pathname.startsWith('/story');
+  const lastFetchedSessionIdRef = useRef<string | null>(null);
+  const lastPatchedTitleKeyRef = useRef<string>('');
+
+  useEffect(() => {
+    if (!sessionId) {
+      lastFetchedSessionIdRef.current = null;
+      lastPatchedTitleKeyRef.current = '';
+      return;
+    }
+
+    if (lastFetchedSessionIdRef.current === sessionId) {
+      return;
+    }
+
+    lastFetchedSessionIdRef.current = sessionId;
+    void fetchSessions();
+  }, [sessionId, fetchSessions]);
+
+  useEffect(() => {
+    if (!sessionId || !storyTitle) {
+      return;
+    }
+
+    const patchKey = `${sessionId}:${storyTitle}`;
+    if (lastPatchedTitleKeyRef.current === patchKey) {
+      return;
+    }
+
+    lastPatchedTitleKeyRef.current = patchKey;
+    updateSessionInState(sessionId, {
+      title: storyTitle,
+      updated_at: new Date().toISOString(),
+    });
+  }, [sessionId, storyTitle, updateSessionInState]);
 
   // ── New story (reset everything) ──────────────────────────────────────────
   const handleNewStory = useCallback(() => {
