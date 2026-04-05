@@ -20,14 +20,12 @@ export function HomePage() {
   const {
     status,
     startStory,
-    fetchSessions,
   } = useOutletContext<AppOutletContext>();
 
   const handleBeginStory = useCallback((prompt: string) => {
     void startStory(prompt);
-    void fetchSessions();
     navigate('/story/live');
-  }, [startStory, fetchSessions, navigate]);
+  }, [startStory, navigate]);
 
   const handleTalkToElora = useCallback(() => {
     navigate('/companion');

@@ -2,13 +2,13 @@
 HTTP route handlers.
 
 Routers:
-  router     — static assets and SPA (no version prefix needed)
-  api_router — versioned story generation API (mounted at /api/v1 by factory)
+  router     â€” static assets and SPA (no version prefix needed)
+  api_router â€” versioned story generation API (mounted at /api/v1 by factory)
 
 Routes:
-  GET  /                        — serve frontend SPA
-  GET  /api/images/{filename}   — serve generated images (inline from Gemini)
-  POST /api/v1/stories          — ADK agent: stream illustrated story (SSE)
+  GET  /                        â€” serve frontend SPA
+  GET  /api/images/{filename}   â€” serve generated images (inline from Gemini)
+  POST /api/v1/stories          â€” ADK agent: stream illustrated story (SSE)
 """
 
 import asyncio
@@ -35,8 +35,8 @@ from app.server.sse import format_sse_event
 
 logger = logging.getLogger("chronicler")
 
-# ── Two routers ────────────────────────────────────────────────────────────────
-# router:     static assets + SPA (no prefix — registered directly in factory)
+# â”€â”€ Two routers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# router:     static assets + SPA (no prefix â€” registered directly in factory)
 # api_router: versioned story API (factory mounts under /api/v1)
 
 # Flush Elora text to Firestore every ~800 characters to survive interruptions
@@ -56,6 +56,9 @@ _IMAGE_EXT_MAP = {
     "image/webp": ".webp",
     "image/gif": ".gif",
 }
+_TITLE_MARKER_PREFIX = "[[TITLE:"
+_TITLE_MARKER_SUFFIX = "]]"
+_MAX_TITLE_BUFFER_CHARS = 1200
 
 router = APIRouter()
 api_router = APIRouter()
@@ -94,7 +97,87 @@ def _extract_inline_image(part: genai_types.Part) -> tuple[bytes, str] | None:
     return image_bytes, mime
 
 
-# ── Frontend SPA ──────────────────────────────────────────────────────────────
+def _sanitize_title(raw_title: str) -> str:
+    """Trim, normalize spacing, and bound title length."""
+    title = re.sub(r"\s+", " ", (raw_title or "").strip())
+    if len(title) > 160:
+        title = title[:160].rstrip()
+    return title
+
+
+def _derive_fallback_title(prompt: str) -> str:
+    """Derive a readable title from the user prompt."""
+    cleaned = re.sub(r"\s+", " ", (prompt or "").strip())
+    if not cleaned:
+        return "Untitled Story"
+
+    cleaned = re.sub(
+        r"^(write|tell|create|generate)\s+(me\s+)?(a|an)?\s*story\s+(about|on)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip(" .,:;!-")
+    if not cleaned:
+        return "Untitled Story"
+
+    snippet = " ".join(cleaned.split()[:8]).strip(" .,:;!-")
+    if not snippet:
+        return "Untitled Story"
+    return snippet[:80].rstrip(" .,:;!-").title() or "Untitled Story"
+
+
+def _extract_title_marker_from_buffer(buffer: str) -> tuple[str | None, str, bool]:
+    """Parse a leading [[TITLE: ...]] marker from buffered prose.
+
+    Returns (title, visible_text, resolved):
+      - resolved=False means keep buffering more chunks.
+      - title=None with resolved=True means caller should use fallback title.
+    """
+    if not buffer:
+        return None, "", False
+
+    trimmed = buffer.lstrip()
+    if not trimmed.startswith("[["):
+        return None, buffer, True
+    if _TITLE_MARKER_PREFIX.startswith(trimmed):
+        return None, "", False
+    if not trimmed.startswith(_TITLE_MARKER_PREFIX):
+        return None, buffer, True
+
+    marker_end = trimmed.find(_TITLE_MARKER_SUFFIX, len(_TITLE_MARKER_PREFIX))
+    if marker_end == -1:
+        if len(trimmed) > _MAX_TITLE_BUFFER_CHARS:
+            return None, buffer, True
+        return None, "", False
+
+    raw_title = trimmed[len(_TITLE_MARKER_PREFIX):marker_end]
+    parsed_title = _sanitize_title(raw_title)
+    visible_text = trimmed[marker_end + len(_TITLE_MARKER_SUFFIX):].lstrip("\r\n")
+    return parsed_title or None, visible_text, True
+
+
+async def _persist_and_emit_title(
+    *,
+    store: SessionStore | None,
+    user_id: str,
+    session_id: str,
+    title: str,
+    brief: str = "",
+) -> str:
+    """Persist a session title when possible and return the SSE payload."""
+    resolved_title = _sanitize_title(title) or "Untitled Story"
+    if store:
+        await asyncio.to_thread(
+            SessionQueryService.update_session_title,
+            user_id,
+            session_id,
+            resolved_title,
+        )
+        logger.info("[Story] session_title_set title=%s", resolved_title)
+    return format_sse_event({"type": "title", "title": resolved_title, "brief": brief})
+
+
+# â”€â”€ Frontend SPA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/")
 async def serve_index():
@@ -102,7 +185,7 @@ async def serve_index():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
-# ── Request model ─────────────────────────────────────────────────────────────
+# â”€â”€ Request model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class StoryRequest(BaseModel):
     prompt: str
@@ -121,7 +204,7 @@ class StoryRequest(BaseModel):
         return v
 
 
-# ── Illustrated story generation (ADK + Gemini 3 Pro Image Preview) ──────────
+# â”€â”€ Illustrated story generation (ADK + Gemini 3 Pro Image Preview) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @api_router.post(
     "/stories",
@@ -139,12 +222,12 @@ async def generate_story(request: StoryRequest, http_request: Request):
     Stream an illustrated story from the Elora ADK agent.
 
     Returns a Server-Sent Events stream. Each event is a JSON object with a `type`:
-      {"type": "session", "session_id": "..."}    — resolved session id
-      {"type": "text",  "chunk": "..."}          — prose narrative chunk
+      {"type": "session", "session_id": "..."}    â€” resolved session id
+      {"type": "text",  "chunk": "..."}          â€” prose narrative chunk
       {"type": "image", "url": "/api/images/...", "caption": "..."}
       {"type": "music", "url": "/api/music/..."}
-      {"type": "done"}                            — stream complete
-      {"type": "error", "message": "..."}         — generation error (generic message)
+      {"type": "done"}                            â€” stream complete
+      {"type": "error", "message": "..."}         â€” generation error (generic message)
     """
     logger.info(
         "[Story] request_received has_auth=%s requested_user_id=%s requested_session_id=%s",
@@ -177,6 +260,9 @@ async def generate_story(request: StoryRequest, http_request: Request):
     async def event_stream():
         elora_text_buffer: list[str] = []
         elora_buffered_chars: int = 0
+        title_emitted: bool = False
+        direct_title_mode: bool = True
+        title_buffer: str = ""
         parts_seen: int = 0
         text_chunks_seen: int = 0
         images_emitted: int = 0
@@ -196,6 +282,8 @@ async def generate_story(request: StoryRequest, http_request: Request):
 
             # Load companion context if available
             prompt_text = request.prompt
+            proposed_title: str | None = None
+            proposed_brief: str | None = None
             if request.companion_session_id and is_authenticated:
                 companion_store = SessionStore(user_id)
                 resumed = await asyncio.to_thread(
@@ -206,23 +294,33 @@ async def generate_story(request: StoryRequest, http_request: Request):
                         companion_store.get_companion_data
                     )
                     if companion_context:
-                        prompt_text = f"{companion_context}\n\nThe traveler is ready. Begin the story now.\n\nOriginal prompt: {request.prompt}"
+                        prompt_text = (
+                            f"{companion_context}\n\n"
+                            "The traveler is ready. Begin the story now.\n"
+                        )
+                        if proposed_title:
+                            prompt_text += (
+                                f'The story title is already fixed as "{proposed_title}". '
+                                "Do not emit a [[TITLE: ...]] marker. Begin directly with story prose.\n"
+                            )
+                        prompt_text += f"\nOriginal prompt: {request.prompt}"
                         companion_context_applied = True
                         logger.info(
                             "[Story] companion_context_loaded session_id=%s",
                             request.companion_session_id,
                         )
-                        # Update story session title from companion's proposal
-                        if proposed_title:
-                            if store:
-                                await asyncio.to_thread(
-                                    SessionQueryService.update_session_title,
-                                    user_id,
-                                    session_id,
-                                    proposed_title,
-                                )
-                                logger.info("[Story] session_title_set title=%s", proposed_title)
-                            yield format_sse_event({"type": "title", "title": proposed_title, "brief": proposed_brief or ""})
+            if companion_context_applied:
+                # Companion-driven stories use the companion title only.
+                direct_title_mode = False
+                resolved_title = _sanitize_title(proposed_title or "") or _derive_fallback_title(request.prompt)
+                yield await _persist_and_emit_title(
+                    store=store,
+                    user_id=user_id,
+                    session_id=session_id,
+                    title=resolved_title,
+                    brief=proposed_brief or "",
+                )
+                title_emitted = True
 
             # Log the user's prompt to Firestore
             if store:
@@ -233,7 +331,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                 parts=[genai_types.Part(text=prompt_text)],
             )
 
-            # ── Heartbeat + event queue pattern ─────────────────────────
+            # â”€â”€ Heartbeat + event queue pattern â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             # runner.run_async with stream=False can block for 60+ seconds.
             # We collect events into an asyncio.Queue from a background task
             # and emit SSE keep-alive pings while waiting.
@@ -260,7 +358,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                         event_queue.get(), timeout=HEARTBEAT_INTERVAL_SECONDS
                     )
                 except asyncio.TimeoutError:
-                    # No event yet — send a keep-alive ping
+                    # No event yet â€” send a keep-alive ping
                     yield format_sse_event({"type": "thinking"})
                     continue
 
@@ -275,39 +373,68 @@ async def generate_story(request: StoryRequest, http_request: Request):
 
                 for part in event.content.parts:
                     parts_seen += 1
-                    logger.debug(
-                        "[Story] part_received idx=%d has_text=%s has_inline_data=%s mime=%s has_function_response=%s thought=%s",
-                        parts_seen,
-                        bool(getattr(part, "text", None)),
-                        bool(getattr(part, "inline_data", None)),
-                        getattr(getattr(part, "inline_data", None), "mime_type", None),
-                        bool(getattr(part, "function_response", None)),
-                        bool(getattr(part, "thought", False)),
-                    )
-                    # Skip model thinking/reasoning parts — not story content
                     if getattr(part, "thought", False):
                         thought_parts_skipped += 1
                         continue
 
-                    # ── Text chunk ────────────────────────────
+                    if not title_emitted and direct_title_mode and not getattr(part, "text", None):
+                        resolved_title = _derive_fallback_title(request.prompt)
+                        yield await _persist_and_emit_title(
+                            store=store,
+                            user_id=user_id,
+                            session_id=session_id,
+                            title=resolved_title,
+                        )
+                        title_emitted = True
+
+                    # â”€â”€ Text chunk â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                     text_value = getattr(part, "text", None)
                     if text_value:
-                        text_chunks_seen += 1
-                        yield format_sse_event({"type": "text", "chunk": text_value})
-                        elora_text_buffer.append(text_value)
-                        elora_buffered_chars += len(text_value)
+                        visible_text = text_value
+                        if not title_emitted:
+                            if direct_title_mode:
+                                title_buffer += text_value
+                                marker_title, parsed_text, resolved = _extract_title_marker_from_buffer(title_buffer)
+                                if not resolved:
+                                    continue
+                                title_buffer = ""
+                                resolved_title = marker_title or _derive_fallback_title(request.prompt)
+                                yield await _persist_and_emit_title(
+                                    store=store,
+                                    user_id=user_id,
+                                    session_id=session_id,
+                                    title=resolved_title,
+                                )
+                                title_emitted = True
+                                visible_text = parsed_text
+                            else:
+                                # Defensive fallback: companion flow should already emit title.
+                                resolved_title = _derive_fallback_title(request.prompt)
+                                yield await _persist_and_emit_title(
+                                    store=store,
+                                    user_id=user_id,
+                                    session_id=session_id,
+                                    title=resolved_title,
+                                )
+                                title_emitted = True
+
+                        if visible_text:
+                            text_chunks_seen += 1
+                            yield format_sse_event({"type": "text", "chunk": visible_text})
+                            elora_text_buffer.append(visible_text)
+                            elora_buffered_chars += len(visible_text)
                         # Flush to Firestore periodically so content survives interruptions
                         if store and elora_buffered_chars >= ELORA_FLUSH_CHARS:
                             await asyncio.to_thread(store.log_interaction, "elora", "".join(elora_text_buffer))
                             elora_text_buffer.clear()
                             elora_buffered_chars = 0
 
-                    # ── Inline image (native Gemini 3 Pro Image Preview output) ──
+                    # â”€â”€ Inline image (native Gemini 3 Pro Image Preview output) â”€â”€
                     extracted = _extract_inline_image(part)
                     if extracted:
                         image_bytes, mime = extracted
 
-                        # Size guard — skip oversized images
+                        # Size guard â€” skip oversized images
                         if len(image_bytes) > MAX_IMAGE_BYTES:
                             logger.warning("[Image] Oversized inline image skipped (%d bytes)", len(image_bytes))
                             continue
@@ -347,7 +474,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                                 "blob_path": blob_path,
                             })
 
-                    # ── Tool response (music, or legacy image) ────────
+                    # â”€â”€ Tool response (music, or legacy image) â”€â”€â”€â”€â”€â”€â”€â”€
                     if part.function_response:
                         result = part.function_response.response or {}
                         fn_name = part.function_response.name
@@ -369,6 +496,23 @@ async def generate_story(request: StoryRequest, http_request: Request):
             # Flush accumulated Elora text to Firestore
             if store and elora_text_buffer:
                 await asyncio.to_thread(store.log_interaction, "elora", "".join(elora_text_buffer))
+
+            if not title_emitted:
+                marker_title, parsed_text, _ = _extract_title_marker_from_buffer(title_buffer)
+                resolved_title = marker_title or _derive_fallback_title(request.prompt)
+                yield await _persist_and_emit_title(
+                    store=store,
+                    user_id=user_id,
+                    session_id=session_id,
+                    title=resolved_title,
+                )
+                title_emitted = True
+                if parsed_text:
+                    yield format_sse_event({"type": "text", "chunk": parsed_text})
+                    elora_text_buffer.append(parsed_text)
+                elif title_buffer and not title_buffer.lstrip().startswith("[["):
+                    yield format_sse_event({"type": "text", "chunk": title_buffer})
+                    elora_text_buffer.append(title_buffer)
 
             # Mark session as ended
             if store:
@@ -426,7 +570,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
     )
 
 
-# ── Static asset serving ──────────────────────────────────────────────────────
+# â”€â”€ Static asset serving â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get(
     "/api/images/{filename}",

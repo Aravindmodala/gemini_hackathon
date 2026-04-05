@@ -22,16 +22,14 @@ export function CompanionPage() {
     dismissProposal,
     companionSessionId,
     startStory,
-    fetchSessions,
   } = useOutletContext<AppOutletContext>();
 
   const handleStartJourney = useCallback(() => {
     if (!proposal) return;
     const storyPrompt = `${proposal.title}: ${proposal.brief}`;
     void startStory(storyPrompt, companionSessionId ?? undefined);
-    void fetchSessions();
     navigate('/story/live');
-  }, [proposal, companionSessionId, startStory, fetchSessions, navigate]);
+  }, [proposal, companionSessionId, startStory, navigate]);
 
   const handleNotReady = useCallback(() => {
     dismissProposal();

@@ -312,6 +312,143 @@ class TestGenerateStory:
         assert events[0]["session_id"] == "sess-xyz"
 
     @pytest.mark.asyncio
+    async def test_story_parses_title_marker_before_text(self, client):
+        """Direct flow parses [[TITLE: ...]] marker and strips it from prose."""
+        async def mock_run_async(**kwargs):
+            yield _make_text_event("[[TITLE: Mosquito Man Rising]]\nLeo woke to the buzz of destiny.")
+
+        mock_store = MagicMock()
+        mock_store.create_session.return_value = "sess-title-1"
+
+        with patch("app.server.routes.get_optional_user", new=AsyncMock(return_value={"uid": "auth-user-1"})), \
+             patch("app.server.session_resolver.SessionStore", return_value=mock_store), \
+             patch("app.server.routes.runner") as mock_runner, \
+             patch("app.server.routes.SessionQueryService.update_session_title", return_value=True) as mock_update_title:
+            mock_runner.session_service.get_session = AsyncMock(return_value=None)
+            mock_runner.session_service.create_session = AsyncMock()
+            mock_runner.run_async = mock_run_async
+
+            response = await client.post(
+                "/api/v1/stories",
+                headers={"Authorization": "Bearer valid-token"},
+                json={"prompt": "write a story about mosquito man"},
+            )
+
+        events = await self._sse_lines(response)
+        assert events[0]["type"] == "session"
+        assert events[1]["type"] == "title"
+        assert events[1]["title"] == "Mosquito Man Rising"
+
+        text_events = [e for e in events if e.get("type") == "text"]
+        assert len(text_events) == 1
+        assert text_events[0]["chunk"] == "Leo woke to the buzz of destiny."
+        assert "[[TITLE:" not in text_events[0]["chunk"]
+        mock_update_title.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_story_parses_title_marker_split_across_chunks(self, client):
+        """Direct flow keeps buffering until a split title marker is complete."""
+        async def mock_run_async(**kwargs):
+            yield _make_text_event("[[TI")
+            yield _make_text_event("TLE: Neon Wings]]\nThe city never slept.")
+
+        mock_store = MagicMock()
+        mock_store.create_session.return_value = "sess-title-split"
+
+        with patch("app.server.routes.get_optional_user", new=AsyncMock(return_value={"uid": "auth-user-split"})), \
+             patch("app.server.session_resolver.SessionStore", return_value=mock_store), \
+             patch("app.server.routes.runner") as mock_runner, \
+             patch("app.server.routes.SessionQueryService.update_session_title", return_value=True) as mock_update_title:
+            mock_runner.session_service.get_session = AsyncMock(return_value=None)
+            mock_runner.session_service.create_session = AsyncMock()
+            mock_runner.run_async = mock_run_async
+
+            response = await client.post(
+                "/api/v1/stories",
+                headers={"Authorization": "Bearer valid-token"},
+                json={"prompt": "write a story about neon wings"},
+            )
+
+        events = await self._sse_lines(response)
+        title_events = [e for e in events if e.get("type") == "title"]
+        text_events = [e for e in events if e.get("type") == "text"]
+
+        assert len(title_events) == 1
+        assert title_events[0]["title"] == "Neon Wings"
+        assert text_events == [{"type": "text", "chunk": "The city never slept."}]
+        mock_update_title.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_story_falls_back_to_prompt_title_when_marker_missing(self, client):
+        """When direct flow omits title marker, backend emits derived fallback title."""
+        async def mock_run_async(**kwargs):
+            yield _make_text_event("The city did not know his name yet.")
+
+        mock_store = MagicMock()
+        mock_store.create_session.return_value = "sess-title-2"
+
+        with patch("app.server.routes.get_optional_user", new=AsyncMock(return_value={"uid": "auth-user-2"})), \
+             patch("app.server.session_resolver.SessionStore", return_value=mock_store), \
+             patch("app.server.routes.runner") as mock_runner, \
+             patch("app.server.routes.SessionQueryService.update_session_title", return_value=True) as mock_update_title:
+            mock_runner.session_service.get_session = AsyncMock(return_value=None)
+            mock_runner.session_service.create_session = AsyncMock()
+            mock_runner.run_async = mock_run_async
+
+            response = await client.post(
+                "/api/v1/stories",
+                headers={"Authorization": "Bearer valid-token"},
+                json={"prompt": "write a story about mosquito man in neo veridia"},
+            )
+
+        events = await self._sse_lines(response)
+        assert events[0]["type"] == "session"
+        assert events[1]["type"] == "title"
+        assert events[1]["title"]  # non-empty fallback
+        assert events[2]["type"] == "text"
+        assert events[2]["chunk"] == "The city did not know his name yet."
+        mock_update_title.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_companion_flow_uses_companion_title_and_does_not_parse_marker(self, client):
+        """Companion flow emits proposal title and leaves story text untouched."""
+        async def mock_run_async(**kwargs):
+            # In companion mode this must stay as prose; no marker parsing.
+            yield _make_text_event("[[TITLE: Should Not Be Parsed]]\nCompanion-guided prose.")
+
+        mock_companion_store = MagicMock()
+        mock_companion_store.resume_session.return_value = True
+        mock_companion_store.get_companion_data.return_value = (
+            "Companion context",
+            "Echoes Of Yesterday",
+            "A tale shaped by memory",
+        )
+
+        with patch("app.server.routes.get_optional_user", new=AsyncMock(return_value={"uid": "user-1"})), \
+             patch("app.server.routes.runner") as mock_runner, \
+             patch("app.server.routes.SessionStore", return_value=mock_companion_store), \
+             patch("app.server.routes.SessionQueryService.update_session_title", return_value=True) as mock_update_title:
+            mock_runner.session_service.get_session = AsyncMock(return_value=None)
+            mock_runner.session_service.create_session = AsyncMock()
+            mock_runner.run_async = mock_run_async
+
+            response = await client.post(
+                "/api/v1/stories",
+                headers={"Authorization": "Bearer valid-token"},
+                json={"prompt": "tell me a story", "companion_session_id": "companion-123"},
+            )
+
+        events = await self._sse_lines(response)
+        title_events = [e for e in events if e.get("type") == "title"]
+        text_events = [e for e in events if e.get("type") == "text"]
+
+        assert len(title_events) == 1
+        assert title_events[0]["title"] == "Echoes Of Yesterday"
+        assert len(text_events) == 1
+        assert text_events[0]["chunk"].startswith("[[TITLE: Should Not Be Parsed]]")
+        mock_update_title.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_story_auth_uses_header_user_id_as_canonical(self, client):
         """Authenticated request uses token uid instead of body user_id."""
         captured = {}

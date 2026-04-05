@@ -19,7 +19,30 @@ export function useSessions() {
       });
       if (!res.ok) throw new Error('Failed to fetch sessions');
       const data = await res.json();
-      setSessions(data.data);
+      setSessions(prev => {
+        const incoming = Array.isArray(data.data) ? data.data : [];
+        const prevById = new Map(prev.map(session => [session.session_id, session]));
+
+        const merged = incoming.map((session: Session) => {
+          const existing = prevById.get(session.session_id);
+          if (!existing) {
+            return session;
+          }
+
+          const shouldPreserveLocalTitle =
+            (session.title === 'Untitled Story' || !session.title) &&
+            existing.title &&
+            existing.title !== 'Untitled Story';
+
+          return shouldPreserveLocalTitle
+            ? { ...session, title: existing.title, updated_at: existing.updated_at ?? session.updated_at }
+            : session;
+        });
+
+        const incomingIds = new Set(merged.map((session: Session) => session.session_id));
+        const localOnly = prev.filter(session => !incomingIds.has(session.session_id));
+        return [...localOnly, ...merged];
+      });
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -77,6 +100,30 @@ export function useSessions() {
     }
   }, [getIdToken]);
 
+  const updateSessionInState = useCallback(
+    (sessionId: string, patch: Partial<Session>) => {
+      setSessions(prev => {
+        const existing = prev.find(s => s.session_id === sessionId);
+        if (existing) {
+          return prev.map(s => (s.session_id === sessionId ? { ...s, ...patch } : s));
+        }
+
+        const now = new Date().toISOString();
+        const placeholder: Session = {
+          session_id: sessionId,
+          title: typeof patch.title === 'string' ? patch.title : 'Untitled Story',
+          status: patch.status ?? 'active',
+          created_at: patch.created_at ?? now,
+          updated_at: patch.updated_at ?? now,
+          interaction_count: patch.interaction_count ?? 0,
+          preview: patch.preview ?? '',
+        };
+        return [placeholder, ...prev];
+      });
+    },
+    []
+  );
+
   // Fetch once auth is ready and user is logged in
   useEffect(() => {
     if (!authLoading && user) {
@@ -96,5 +143,6 @@ export function useSessions() {
     getSessionDetail,
     deleteSession,
     renameSession,
+    updateSessionInState,
   };
 }

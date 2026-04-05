@@ -6,6 +6,7 @@
  */
 import { renderHook, act } from '@testing-library/react';
 import { useStoryteller } from '../useStoryteller';
+import { API_BASE } from '../../config/api';
 
 // ── SSE stream helpers ────────────────────────────────────────────────────────
 
@@ -150,6 +151,49 @@ describe('useStoryteller', () => {
     });
   });
 
+  describe('session and title event handling', () => {
+    it('sets sessionId and storyTitle from SSE events', async () => {
+      mockFetch([
+        sseData({ type: 'session', session_id: 'sess-123' }),
+        sseData({ type: 'title', title: 'Mosquito Man Rising' }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('A story');
+      });
+
+      expect(result.current.sessionId).toBe('sess-123');
+      expect(result.current.storyTitle).toBe('Mosquito Man Rising');
+    });
+
+    it('resets prior sessionId and storyTitle when a new story starts', async () => {
+      mockFetch([
+        sseData({ type: 'session', session_id: 'sess-1' }),
+        sseData({ type: 'title', title: 'First Title' }),
+        sseData({ type: 'done' }),
+      ]);
+
+      const { result } = renderHook(() => useStoryteller());
+      await act(async () => {
+        await result.current.startStory('First story');
+      });
+
+      expect(result.current.sessionId).toBe('sess-1');
+      expect(result.current.storyTitle).toBe('First Title');
+
+      mockFetch([sseData({ type: 'done' })]);
+
+      await act(async () => {
+        await result.current.startStory('Second story');
+      });
+
+      expect(result.current.sessionId).toBeNull();
+      expect(result.current.storyTitle).toBeNull();
+    });
+  });
+
   // ── SSE event parsing — text ──────────────────────────────────────────────
 
   describe('text event handling', () => {
@@ -224,7 +268,7 @@ describe('useStoryteller', () => {
       const imageSections = result.current.sections.filter(s => s.type === 'image');
       expect(imageSections.length).toBe(1);
       const img = imageSections[0] as { type: 'image'; url: string; caption: string };
-      expect(img.url).toBe('/api/images/dragon.png');
+      expect(img.url).toBe(`${API_BASE}/api/images/dragon.png`);
       expect(img.caption).toBe('A dragon');
     });
 
@@ -261,7 +305,7 @@ describe('useStoryteller', () => {
       const musicSections = result.current.sections.filter(s => s.type === 'music');
       expect(musicSections.length).toBe(1);
       const music = musicSections[0] as { type: 'music'; url: string; duration: number };
-      expect(music.url).toBe('/api/music/theme.wav');
+      expect(music.url).toBe(`${API_BASE}/api/music/theme.wav`);
       expect(music.duration).toBe(33);
     });
 
@@ -276,7 +320,7 @@ describe('useStoryteller', () => {
         await result.current.startStory('A story');
       });
 
-      expect(result.current.currentMusic).toBe('/api/music/theme.wav');
+      expect(result.current.currentMusic).toBe(`${API_BASE}/api/music/theme.wav`);
     });
 
     it('starts audio playback at 35% volume on music event', async () => {
@@ -358,7 +402,7 @@ describe('useStoryteller', () => {
   // ── fetch options ─────────────────────────────────────────────────────────
 
   describe('fetch configuration', () => {
-    it('sends POST to API base /api/story with the prompt', async () => {
+    it('sends POST to API base /api/v1/stories with the prompt', async () => {
       const mockFetchFn = vi.fn().mockResolvedValue({
         ok: true,
         body: makeSSEStream([sseData({ type: 'done' })]),
@@ -371,7 +415,7 @@ describe('useStoryteller', () => {
       });
 
       const [url, options] = mockFetchFn.mock.calls[0];
-      expect(url).toBe('http://localhost:3001/api/story');
+      expect(url).toBe(`${API_BASE}/api/v1/stories`);
       expect(options.method).toBe('POST');
       const body = JSON.parse(options.body);
       expect(body.prompt).toBe('A dragon tale');
@@ -440,7 +484,7 @@ describe('useStoryteller', () => {
       await act(async () => {
         await result.current.startStory('A story');
       });
-      expect(result.current.currentMusic).toBe('/api/music/x.wav');
+      expect(result.current.currentMusic).toBe(`${API_BASE}/api/music/x.wav`);
 
       act(() => {
         result.current.stopStory();
