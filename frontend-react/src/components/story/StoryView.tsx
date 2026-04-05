@@ -12,6 +12,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import type { StorySection, StoryStatus } from '../../hooks/useStoryteller';
+import {
+  formatStoryText,
+  type InlineChunk,
+} from '../../utils/formatStory';
 import styles from './StoryView.module.css';
 
 interface StoryViewProps {
@@ -27,6 +31,22 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function renderSegments(segments: InlineChunk[]) {
+  return segments.map((segment, idx) => {
+    const className =
+      segment.emphasis === 'bold'
+        ? styles.emphasisBold
+        : segment.emphasis === 'italic'
+        ? styles.emphasisItalic
+        : undefined;
+    return (
+      <span key={`segment-${idx}`} className={className}>
+        {segment.text}
+      </span>
+    );
+  });
 }
 
 export function StoryView({
@@ -163,22 +183,78 @@ export function StoryView({
 
             /* ── Text prose ─────────────────────────────────────────────── */
             if (section.type === 'text') {
+              const blocks = formatStoryText(section.content);
               const prevIsText = i > 0 && sections[i - 1]?.type === 'text';
-              const isLastText = status === 'generating' && i === lastTextIndex;
+              const isLastTextSection = status === 'generating' && i === lastTextIndex;
 
-              return (
-                <p
-                  key={i}
-                  className={`${styles.animSection} ${styles.prose}`}
-                  style={{
-                    textIndent: prevIsText ? '2em' : undefined,
-                    transitionDelay: `${delay}s`,
-                  }}
-                >
-                  {section.content}
-                  {isLastText && <span className={styles.cursor} aria-hidden />}
-                </p>
-              );
+              return blocks.map((block, blockIndex) => {
+                const isLastTextBlock = isLastTextSection && blockIndex === blocks.length - 1;
+                const key = `text-${i}-${blockIndex}-${block.type}`;
+
+                if (block.type === 'paragraph') {
+                  return (
+                    <p
+                      key={key}
+                      data-testid={`story-block-paragraph-${i}-${blockIndex}`}
+                      className={`${styles.animSection} ${styles.prose} ${styles.paragraphBlock}`}
+                      style={{
+                        transitionDelay: `${delay}s`,
+                        textIndent: prevIsText ? '1.5em' : undefined,
+                      }}
+                    >
+                      {renderSegments(block.chunks)}
+                      {isLastTextBlock && <span className={styles.cursor} aria-hidden />}
+                    </p>
+                  );
+                }
+
+                if (block.type === 'heading') {
+                  return (
+                    <h2
+                      key={key}
+                      data-testid={`story-block-heading-${i}-${blockIndex}`}
+                      className={`${styles.animSection} ${styles.headingBlock}`}
+                      style={{ transitionDelay: `${delay}s` }}
+                    >
+                      {renderSegments(block.chunks)}
+                    </h2>
+                  );
+                }
+
+                if (block.type === 'sceneDivider') {
+                  return (
+                    <div
+                      key={key}
+                      data-testid={`story-block-divider-${i}-${blockIndex}`}
+                      className={`${styles.animSection} ${styles.dividerBlock}`}
+                      style={{ transitionDelay: `${delay}s` }}
+                    >
+                      {block.label || '...'}
+                    </div>
+                  );
+                }
+
+                if (block.type === 'dialogue') {
+                  return (
+                    <div
+                      key={key}
+                      data-testid={`story-block-dialogue-${i}-${blockIndex}`}
+                      className={`${styles.animSection} ${styles.dialogueBlock}`}
+                      style={{ transitionDelay: `${delay}s` }}
+                    >
+                      {block.speaker && (
+                        <p className={styles.dialogueSpeaker}>{block.speaker}</p>
+                      )}
+                      <p className={styles.dialogueText}>
+                        {renderSegments(block.chunks)}
+                        {isLastTextBlock && <span className={styles.cursor} aria-hidden />}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return null;
+              });
             }
 
             /* ── Scene image ────────────────────────────────────────────── */

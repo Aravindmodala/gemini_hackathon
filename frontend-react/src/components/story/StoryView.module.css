@@ -238,6 +238,53 @@
   hyphens: auto;
 }
 
+.paragraphBlock {
+  margin-bottom: 16px;
+}
+
+.headingBlock {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(1.6rem, 2.5vw, 2.4rem);
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: #f0e8d8;
+  margin: 32px 0 12px;
+}
+
+.dividerBlock {
+  margin: 32px 0 22px;
+  text-align: center;
+  letter-spacing: 0.4em;
+  font-family: var(--font-display, 'Cinzel', serif);
+  color: rgba(240, 232, 216, 0.35);
+  font-size: 11px;
+}
+
+.dialogueBlock {
+  margin: 22px 0;
+  padding-left: 24px;
+  border-left: 2px solid rgba(124, 58, 237, 0.2);
+}
+
+.dialogueSpeaker {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin: 0 0 6px;
+  color: rgba(240, 232, 216, 0.6);
+}
+
+.dialogueText {
+  margin: 0;
+}
+
+.emphasisBold {
+  font-weight: 700;
+}
+
+.emphasisItalic {
+  font-style: italic;
+}
 /* Blinking cursor for streaming text */
 .cursor {
   display: inline-block;
