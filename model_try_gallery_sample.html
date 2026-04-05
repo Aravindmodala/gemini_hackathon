@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gemini Image Tester</title>
+  <style>
+    body {
+      margin: 24px;
+      font-family: Georgia, "Times New Roman", serif;
+      background: #f6f4ef;
+      color: #1b1b1b;
+      max-width: 980px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .note {
+      border: 1px solid #ddd6c7;
+      background: #fff;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+    textarea {
+      width: 100%;
+      min-height: 90px;
+      border: 1px solid #cdbfa7;
+      border-radius: 8px;
+      padding: 10px;
+      font-family: inherit;
+      box-sizing: border-box;
+      margin-bottom: 12px;
+      background: #fff;
+    }
+    button {
+      border: 0;
+      background: #2f5d50;
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 15px;
+    }
+    button:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+    #status {
+      margin: 10px 0;
+      min-height: 24px;
+    }
+    pre {
+      border: 1px solid #ddd6c7;
+      background: #fff;
+      border-radius: 8px;
+      padding: 12px;
+      white-space: pre-wrap;
+      min-height: 72px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    img {
+      width: 100%;
+      height: auto;
+      border: 1px solid #ddd6c7;
+      border-radius: 8px;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <h1>Gemini 3 Pro Image Preview Tester</h1>
+  <div class="note">
+    Run <code>python model_try_web.py</code> and open <code>http://127.0.0.1:8010</code>.
+    Images are saved to <code>emotional-chronicler/_image_cache/model_try/</code>.
+  </div>
+
+  <label for="systemPrompt">System Prompt</label>
+  <textarea id="systemPrompt" placeholder="Optional system prompt..."></textarea>
+
+  <label for="userPrompt">User Prompt</label>
+  <textarea id="userPrompt" placeholder="Describe the image/story scene you want..."></textarea>
+
+  <button id="runBtn">Generate</button>
+  <div id="status"></div>
+
+  <h2>Text Output</h2>
+  <pre id="textOutput"></pre>
+
+  <h2>Images</h2>
+  <div class="grid" id="imageGrid"></div>
+
+  <script>
+    const runBtn = document.getElementById("runBtn");
+    const systemPrompt = document.getElementById("systemPrompt");
+    const userPrompt = document.getElementById("userPrompt");
+    const statusEl = document.getElementById("status");
+    const textOutput = document.getElementById("textOutput");
+    const imageGrid = document.getElementById("imageGrid");
+
+    runBtn.addEventListener("click", async () => {
+      const user = userPrompt.value.trim();
+      if (!user) {
+        statusEl.textContent = "Please enter a user prompt.";
+        return;
+      }
+
+      runBtn.disabled = true;
+      statusEl.textContent = "Generating... this can take a bit for image models.";
+      textOutput.textContent = "";
+      imageGrid.innerHTML = "";
+
+      try {
+        const resp = await fetch("/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_prompt: user,
+            system_prompt: systemPrompt.value || ""
+          })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok) {
+          throw new Error(data.detail || "Request failed");
+        }
+
+        textOutput.textContent = data.text || "(no text returned)";
+
+        if (Array.isArray(data.images) && data.images.length > 0) {
+          for (const src of data.images) {
+            const img = document.createElement("img");
+            img.src = src;
+            img.alt = "Generated image";
+            img.loading = "lazy";
+            imageGrid.appendChild(img);
+          }
+          statusEl.textContent = `Done. ${data.images.length} image(s) saved to local cache.`;
+        } else {
+          statusEl.textContent = "Done. No image returned for this prompt.";
+        }
+      } catch (err) {
+        statusEl.textContent = `Error: ${err.message}`;
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

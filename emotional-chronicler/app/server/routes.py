@@ -12,6 +12,7 @@ Routes:
 """
 
 import asyncio
+import base64
 import logging
 import mimetypes
 import uuid
@@ -58,6 +59,39 @@ _IMAGE_EXT_MAP = {
 
 router = APIRouter()
 api_router = APIRouter()
+
+
+def _coerce_image_bytes(raw: bytes | str | None) -> bytes | None:
+    """Normalize image payloads to raw bytes."""
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return base64.b64decode(raw)
+        except Exception:
+            logger.warning("[Image] Failed to decode base64 inline image payload")
+            return None
+    logger.warning("[Image] Unsupported inline image payload type: %s", type(raw).__name__)
+    return None
+
+
+def _extract_inline_image(part: genai_types.Part) -> tuple[bytes, str] | None:
+    """Extract image bytes + mime from an event part when available."""
+    inline_data = getattr(part, "inline_data", None)
+    if not inline_data:
+        return None
+
+    mime = (getattr(inline_data, "mime_type", None) or "").lower()
+    if not mime.startswith("image/"):
+        return None
+
+    image_bytes = _coerce_image_bytes(getattr(inline_data, "data", None))
+    if not image_bytes:
+        return None
+
+    return image_bytes, mime
 
 
 # ── Frontend SPA ──────────────────────────────────────────────────────────────
@@ -143,6 +177,11 @@ async def generate_story(request: StoryRequest, http_request: Request):
     async def event_stream():
         elora_text_buffer: list[str] = []
         elora_buffered_chars: int = 0
+        parts_seen: int = 0
+        text_chunks_seen: int = 0
+        images_emitted: int = 0
+        thought_parts_skipped: int = 0
+        companion_context_applied: bool = False
         try:
             logger.info(
                 "[Story] stream_start user_id=%s session_id=%s",
@@ -168,6 +207,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                     )
                     if companion_context:
                         prompt_text = f"{companion_context}\n\nThe traveler is ready. Begin the story now.\n\nOriginal prompt: {request.prompt}"
+                        companion_context_applied = True
                         logger.info(
                             "[Story] companion_context_loaded session_id=%s",
                             request.companion_session_id,
@@ -234,15 +274,28 @@ async def generate_story(request: StoryRequest, http_request: Request):
                     continue
 
                 for part in event.content.parts:
+                    parts_seen += 1
+                    logger.debug(
+                        "[Story] part_received idx=%d has_text=%s has_inline_data=%s mime=%s has_function_response=%s thought=%s",
+                        parts_seen,
+                        bool(getattr(part, "text", None)),
+                        bool(getattr(part, "inline_data", None)),
+                        getattr(getattr(part, "inline_data", None), "mime_type", None),
+                        bool(getattr(part, "function_response", None)),
+                        bool(getattr(part, "thought", False)),
+                    )
                     # Skip model thinking/reasoning parts — not story content
                     if getattr(part, "thought", False):
+                        thought_parts_skipped += 1
                         continue
 
                     # ── Text chunk ────────────────────────────
-                    if part.text:
-                        yield format_sse_event({"type": "text", "chunk": part.text})
-                        elora_text_buffer.append(part.text)
-                        elora_buffered_chars += len(part.text)
+                    text_value = getattr(part, "text", None)
+                    if text_value:
+                        text_chunks_seen += 1
+                        yield format_sse_event({"type": "text", "chunk": text_value})
+                        elora_text_buffer.append(text_value)
+                        elora_buffered_chars += len(text_value)
                         # Flush to Firestore periodically so content survives interruptions
                         if store and elora_buffered_chars >= ELORA_FLUSH_CHARS:
                             await asyncio.to_thread(store.log_interaction, "elora", "".join(elora_text_buffer))
@@ -250,8 +303,9 @@ async def generate_story(request: StoryRequest, http_request: Request):
                             elora_buffered_chars = 0
 
                     # ── Inline image (native Gemini 3 Pro Image Preview output) ──
-                    elif hasattr(part, "inline_data") and part.inline_data and getattr(part.inline_data, "mime_type", None) and part.inline_data.mime_type.startswith("image/"):
-                        image_bytes = part.inline_data.data
+                    extracted = _extract_inline_image(part)
+                    if extracted:
+                        image_bytes, mime = extracted
 
                         # Size guard — skip oversized images
                         if len(image_bytes) > MAX_IMAGE_BYTES:
@@ -259,7 +313,6 @@ async def generate_story(request: StoryRequest, http_request: Request):
                             continue
 
                         # Derive extension and content type from the model's MIME type
-                        mime = part.inline_data.mime_type
                         ext = _IMAGE_EXT_MAP.get(mime, ".bin")
                         filename = f"{uuid.uuid4().hex}{ext}"
 
@@ -287,6 +340,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                             "url": image_url,
                             "caption": "",
                         })
+                        images_emitted += 1
                         if store:
                             await asyncio.to_thread(store.log_tool_call, "inline_image", {
                                 "image_url": image_url,
@@ -294,7 +348,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                             })
 
                     # ── Tool response (music, or legacy image) ────────
-                    elif part.function_response:
+                    if part.function_response:
                         result = part.function_response.response or {}
                         fn_name = part.function_response.name
 
@@ -321,10 +375,23 @@ async def generate_story(request: StoryRequest, http_request: Request):
                 await asyncio.to_thread(store.end_session)
 
             logger.info(
-                "[Story] stream_complete user_id=%s session_id=%s",
+                "[Story] stream_complete user_id=%s session_id=%s parts_seen=%d thought_parts_skipped=%d text_chunks=%d images=%d companion_context=%s",
                 user_id,
                 session_id,
+                parts_seen,
+                thought_parts_skipped,
+                text_chunks_seen,
+                images_emitted,
+                companion_context_applied,
             )
+            if images_emitted == 0:
+                logger.warning(
+                    "[Story] no_images_emitted session_id=%s model=%s prompt_len=%d companion_context=%s",
+                    session_id,
+                    getattr(runner.agent, "model", "unknown"),
+                    len(request.prompt),
+                    companion_context_applied,
+                )
             yield format_sse_event({"type": "done"})
 
         except Exception as e:
