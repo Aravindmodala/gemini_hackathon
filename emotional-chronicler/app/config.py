@@ -2,14 +2,13 @@
 Configuration for The Emotional Chronicler.
 
 Reads environment variables for GCP project, location, and model settings.
-Initializes the Google GenAI client for Imagen 4 and Lyria 2 access.
 The ADK agent picks up GCP credentials via Application Default Credentials (ADC).
 """
 
+import datetime
 import os
 from pathlib import Path
 
-from google import genai
 from google.cloud import storage as gcs
 
 # Environment must be loaded by the entry point (main.py) before importing this module.
@@ -33,25 +32,14 @@ os.environ.setdefault("GOOGLE_CLOUD_LOCATION", LOCATION)
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
 
 # ── Models ───────────────────────────────────────────────────
-STORY_MODEL = os.environ.get("STORY_MODEL", "gemini-3.1-pro-preview")  # ADK agent brain
-IMAGEN_MODEL = os.environ.get("IMAGEN_MODEL", "imagen-4.0-generate-001")  # Imagen 4
+STORY_MODEL = os.environ.get("STORY_MODEL", "gemini-3-pro-image-preview")  # ADK agent brain (native text+image output)
 COMPANION_MODEL = os.environ.get("COMPANION_MODEL", "gemini-2.0-flash")  # Pre-story companion
-LYRIA_MODEL = "lyria-002"  # Lyria 2 music generation
 
 # ── Firebase Authentication ───────────────────────────────────
 FIREBASE_ENABLED = os.environ.get("FIREBASE_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── Server ───────────────────────────────────────────────────
 PORT = int(os.environ.get("PORT", 3000))
-
-# ── GenAI SDK Client (singleton) — used by Imagen 4 and Lyria 2 tools ──
-_genai_client: genai.Client | None = None
-
-def get_genai_client() -> genai.Client:
-    global _genai_client
-    if _genai_client is None:
-        _genai_client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
-    return _genai_client
 
 # ── Google Cloud Storage (persistent asset storage) ──────────
 GCS_BUCKET = os.environ.get("GCS_BUCKET", "emotional-chronicler-assets")
@@ -67,19 +55,37 @@ def get_gcs_bucket() -> gcs.Bucket:
 
 
 def upload_to_gcs(blob_path: str, data: bytes, content_type: str) -> str:
-    """Upload bytes to GCS and return the public URL.
+    """Upload bytes to GCS and return the blob path.
 
     Args:
-        blob_path: Path within the bucket (e.g. 'images/abc123.png').
+        blob_path: Path within the bucket (e.g. 'images/{session_id}/abc123.png').
         data: Raw bytes to upload.
         content_type: MIME type (e.g. 'image/png', 'audio/wav').
 
     Returns:
-        Public URL string for the uploaded object.
+        The blob path string (same as input), used to generate signed URLs on demand.
     """
     bucket = get_gcs_bucket()
     blob = bucket.blob(blob_path)
     blob.upload_from_string(data, content_type=content_type)
-    blob.make_public()
-    return blob.public_url
+    return blob_path
+
+
+def generate_signed_url(blob_path: str, expiration_minutes: int = 15) -> str:
+    """Generate a short-lived signed URL for a GCS object.
+
+    Args:
+        blob_path: Path within the bucket (e.g. 'images/{session_id}/abc123.png').
+        expiration_minutes: How long the URL remains valid (default 15 min).
+
+    Returns:
+        A signed URL string that grants temporary read access.
+    """
+    bucket = get_gcs_bucket()
+    blob = bucket.blob(blob_path)
+    return blob.generate_signed_url(
+        version="v4",
+        expiration=datetime.timedelta(minutes=expiration_minutes),
+        method="GET",
+    )
 

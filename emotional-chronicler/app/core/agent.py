@@ -3,7 +3,7 @@
 ADK Elora agent — Creative Storyteller.
 
 Defines two ADK Agents:
-  1. elora_agent      (Gemini 3.1 Pro) — story generation with image + music tools
+  1. elora_agent      (Gemini 3 Pro Image Preview) — story generation with native image output
   2. companion_agent  (Gemini 2.0 Flash) — pre-story conversation to capture mood/emotions
 
 The companion captures context BEFORE story generation, then all its interactions
@@ -15,29 +15,30 @@ import logging
 from google.adk.agents import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.genai import types as genai_types
 
 from app.config import STORY_MODEL, COMPANION_MODEL
 from app.prompts import ELORA_SYSTEM_PROMPT
 from app.prompts.companion import COMPANION_SYSTEM_PROMPT
-from app.tools.imagen import generate_image
-from app.tools.lyria import generate_music
 
 logger = logging.getLogger("chronicler")
 
 APP_NAME = "emotional_chronicler"
 
-# ── Story agent (Gemini 3.1 Pro Preview) ──────────────────────────────────────
+# ── Story agent (Gemini 3 Pro Image Preview — native text + image output) ─────
 
 elora_agent = Agent(
     name="elora",
     model=STORY_MODEL,
     description=(
         "Elora — a master author and storyteller who writes richly illustrated stories. "
-        "She generates literary prose narration and uses Imagen 4 to create scene "
-        "illustrations and Lyria 2 to compose atmospheric background music."
+        "She generates literary prose narration with native inline image generation."
     ),
     instruction=ELORA_SYSTEM_PROMPT,
-    tools=[generate_image, generate_music],
+    tools=[],
+    generate_content_config=genai_types.GenerateContentConfig(
+        response_modalities=["TEXT", "IMAGE"],
+    ),
 )
 
 # ── Session service (shared by both agents) ───────────────────────────────────

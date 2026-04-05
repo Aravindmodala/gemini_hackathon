@@ -5,7 +5,7 @@
  * When idle it returns null (renders nothing).
  */
 import { render, screen, fireEvent } from '@testing-library/react';
-import { AvatarHUD } from '../AvatarHUD';
+import { AvatarHUD } from '../layout/AvatarHUD';
 
 describe('AvatarHUD', () => {
   const mockOnStop = vi.fn();

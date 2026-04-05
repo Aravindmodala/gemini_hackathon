@@ -1,0 +1,450 @@
+/* ================================================================
+   STORY VIEW — Cinematic Editorial Reader
+   Apple-level: hero parallax, reading progress, entrance animations
+   Tokens from index.css: --color-purple, --color-gold-accent, etc.
+   ================================================================ */
+
+/* ── Root containers ───────────────────────────────────────────── */
+
+/* Full-screen mode (non-cardMode) */
+.root {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  background: #0c0c1a;
+}
+
+/* Card mode — fills bento card flex column */
+.rootCard {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  position: relative;
+}
+
+/* ── Reading progress bar ──────────────────────────────────────── */
+.progressTrack {
+  height: 2px;
+  background: rgba(124, 58, 237, 0.08);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+
+.progressBar {
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    var(--color-purple, #7c3aed) 0%,
+    var(--color-purple-light, #a78bfa) 55%,
+    var(--color-teal, #06b6d4) 100%
+  );
+  border-radius: 0 2px 2px 0;
+  transition: width 120ms linear;
+  box-shadow: 0 0 10px rgba(124, 58, 237, 0.55), 0 0 2px rgba(124, 58, 237, 0.8);
+}
+
+/* ── Scroll area ───────────────────────────────────────────────── */
+.scrollArea {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 169, 110, 0.2) transparent;
+}
+
+.scrollArea::-webkit-scrollbar { width: 4px; }
+.scrollArea::-webkit-scrollbar-track { background: transparent; }
+.scrollArea::-webkit-scrollbar-thumb {
+  background: rgba(200, 169, 110, 0.18);
+  border-radius: 2px;
+}
+.scrollArea::-webkit-scrollbar-thumb:hover {
+  background: rgba(200, 169, 110, 0.35);
+}
+
+/* ── Hero zone ─────────────────────────────────────────────────── */
+.heroZone {
+  position: relative;
+  width: 100%;
+  height: clamp(280px, 44vh, 520px);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* Extra top room lets the image slide up during parallax */
+.heroImgWrap {
+  position: absolute;
+  top: -48px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  will-change: transform;
+}
+
+.heroImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Three-layer gradient: soft dark top → clear middle → heavy dark bottom */
+.heroOverlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(5, 5, 20, 0.35) 0%,
+      rgba(5, 5, 20, 0.04) 38%,
+      rgba(5, 5, 20, 0.6) 72%,
+      rgba(5, 5, 20, 0.97) 100%
+    );
+}
+
+/* Title block overlaid on hero bottom */
+.heroContent {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 0 clamp(20px, 6%, 72px) 36px;
+  text-align: center;
+  animation: heroSlideUp 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0.1s;
+}
+
+@keyframes heroSlideUp {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.heroEyebrow {
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-size: 10px;
+  color: var(--color-gold-accent, #c8a96e);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  margin: 0 0 14px;
+  opacity: 0.88;
+}
+
+.heroTitle {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(1.9rem, 4.5vw, 3.4rem);
+  font-weight: 700;
+  color: #f4ede0;
+  line-height: 1.12;
+  margin: 0 0 18px;
+  letter-spacing: -0.01em;
+  text-shadow:
+    0 2px 40px rgba(0, 0, 0, 0.9),
+    0 0 80px rgba(124, 58, 237, 0.18);
+}
+
+/* Ornamental gem below title */
+.heroOrn {
+  font-size: 16px;
+  color: var(--color-gold-accent, #c8a96e);
+  opacity: 0.75;
+  filter: drop-shadow(0 0 6px rgba(200, 169, 110, 0.6));
+  animation: gemPulse 3.5s ease-in-out infinite;
+  line-height: 1;
+}
+
+@keyframes gemPulse {
+  0%, 100% { opacity: 0.75; filter: drop-shadow(0 0 6px rgba(200,169,110,0.6)); }
+  50%       { opacity: 1;    filter: drop-shadow(0 0 14px rgba(200,169,110,0.9)); }
+}
+
+/* ── Editorial column ──────────────────────────────────────────── */
+.column {
+  --col-pad: clamp(20px, 5%, 56px);
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 var(--col-pad) 100px;
+}
+
+/* No-hero title header */
+.header {
+  padding: 80px 0 48px;
+  border-bottom: 1px solid rgba(200, 169, 110, 0.1);
+  margin-bottom: 56px;
+  text-align: center;
+}
+
+.eyebrow {
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-size: 10px;
+  color: var(--color-gold-accent, #c8a96e);
+  letter-spacing: 0.38em;
+  margin: 0 0 20px;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 700;
+  color: #f0e6d3;
+  line-height: 1.18;
+  margin: 0;
+}
+
+.rule {
+  width: 56px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-gold-accent, #c8a96e), transparent);
+  margin: 22px auto 0;
+  opacity: 0.5;
+}
+
+/* ── Section entrance animation (IntersectionObserver) ─────────── */
+.animSection {
+  opacity: 0;
+  transform: translateY(22px);
+  transition:
+    opacity 0.65s ease-out,
+    transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animSection.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Prose text ────────────────────────────────────────────────── */
+.prose {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(17px, 1.5vw, 20px);
+  line-height: 2.05;
+  color: #f0e8d8;
+  text-align: justify;
+  letter-spacing: 0.015em;
+  margin: 0 0 0;
+  padding-top: 28px;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+.paragraphBlock {
+  margin-bottom: 16px;
+}
+
+.headingBlock {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(1.6rem, 2.5vw, 2.4rem);
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: #f0e8d8;
+  margin: 32px 0 12px;
+}
+
+.dividerBlock {
+  margin: 32px 0 22px;
+  text-align: center;
+  letter-spacing: 0.4em;
+  font-family: var(--font-display, 'Cinzel', serif);
+  color: rgba(240, 232, 216, 0.35);
+  font-size: 11px;
+}
+
+.dialogueBlock {
+  margin: 22px 0;
+  padding-left: 24px;
+  border-left: 2px solid rgba(124, 58, 237, 0.2);
+}
+
+.dialogueSpeaker {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin: 0 0 6px;
+  color: rgba(240, 232, 216, 0.6);
+}
+
+.dialogueText {
+  margin: 0;
+}
+
+.emphasisBold {
+  font-weight: 700;
+}
+
+.emphasisItalic {
+  font-style: italic;
+}
+/* Blinking cursor for streaming text */
+.cursor {
+  display: inline-block;
+  width: 2px;
+  height: 20px;
+  background: var(--color-gold-accent, #c8a96e);
+  margin-left: 4px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  animation: cursorBlink 1s step-end infinite;
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ── Scene image block ─────────────────────────────────────────── */
+.sceneBlock {
+  margin-bottom: 12px;
+}
+
+.separator {
+  text-align: center;
+  color: rgba(200, 169, 110, 0.3);
+  font-size: 13px;
+  margin: 48px 0 44px;
+  letter-spacing: 0.55em;
+  font-family: var(--font-display, 'Cinzel', serif);
+}
+
+/* Full-bleed: extends past column padding */
+.figure {
+  margin: 0 calc(-1 * var(--col-pad, 32px));
+}
+
+.imgWrap {
+  position: relative;
+  overflow: hidden;
+}
+
+.sceneImg {
+  width: 100%;
+  height: auto;
+  display: block;
+  object-fit: cover;
+  transform: scale(1.04);
+  transition: transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow:
+    0 20px 80px rgba(0, 0, 0, 0.75),
+    0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+/* Scale reveal when section enters viewport */
+.animSection.visible .sceneImg {
+  transform: scale(1);
+}
+
+/* Vignette edge fade */
+.imgVignette {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(5, 5, 20, 0.12) 0%,
+    transparent 28%,
+    transparent 68%,
+    rgba(5, 5, 20, 0.45) 100%
+  );
+  pointer-events: none;
+}
+
+.caption {
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-size: 10px;
+  color: rgba(200, 169, 110, 0.48);
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  text-align: center;
+  padding: 14px 16px 4px;
+}
+
+/* ── Music pill ────────────────────────────────────────────────── */
+.musicWrapper {
+  display: flex;
+  justify-content: center;
+  margin: 44px 0 12px;
+}
+
+.musicPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 30px;
+  border-radius: 100px;
+  border: 1px solid rgba(200, 169, 110, 0.16);
+  background: rgba(200, 169, 110, 0.04);
+  transition: border-color 0.35s ease, background 0.35s ease, box-shadow 0.35s ease;
+}
+
+.musicPillActive {
+  border-color: rgba(200, 169, 110, 0.42);
+  background: rgba(200, 169, 110, 0.09);
+  box-shadow:
+    0 0 28px rgba(200, 169, 110, 0.14),
+    inset 0 1px 0 rgba(200, 169, 110, 0.08);
+}
+
+.musicNote {
+  font-size: 20px;
+  color: var(--color-gold-accent, #c8a96e);
+  line-height: 1;
+  font-family: 'Playfair Display', Georgia, serif;
+  opacity: 0.7;
+}
+
+.waveIcon {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 20px;
+}
+
+.waveBar {
+  width: 3px;
+  height: 20px;
+  background: var(--color-gold-accent, #c8a96e);
+  border-radius: 2px;
+  transform-origin: bottom;
+  animation: waveAnim 0.85s ease-in-out infinite;
+}
+
+@keyframes waveAnim {
+  0%, 100% { transform: scaleY(0.3); }
+  50%       { transform: scaleY(1);   }
+}
+
+.musicLabel {
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(200, 169, 110, 0.45);
+  transition: color 0.35s ease;
+}
+
+.musicLabelActive {
+  color: var(--color-gold-accent, #c8a96e);
+}
+
+.musicDuration {
+  font-family: monospace;
+  font-size: 12px;
+  color: rgba(200, 169, 110, 0.38);
+  letter-spacing: 0.04em;
+}
+
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .heroTitle { font-size: clamp(1.6rem, 7vw, 2.4rem); }
+  .prose { font-size: 16px; line-height: 1.95; }
+  .heroZone { height: clamp(220px, 40vh, 360px); }
+}

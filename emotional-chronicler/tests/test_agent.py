@@ -1,6 +1,6 @@
 """Unit tests for app/core/agent.py — ADK Elora agent setup.
 
-Tests verify both the story agent (Gemini 3.1 Pro) and the companion agent
+Tests verify both the story agent (Gemini 3 Pro Image Preview) and the companion agent
 (Gemini 2.0 Flash) are constructed correctly.
 """
 
@@ -23,21 +23,19 @@ class TestStoryAgentSetup:
         story_call = Agent.call_args_list[0]
         assert story_call.kwargs.get("name") == "elora"
 
-    def test_agent_tools_include_generate_image(self):
-        """Story agent is built with generate_image in its tools."""
+    def test_agent_tools_are_empty(self):
+        """Story agent has no tools — image generation is native to Gemini 3 Pro."""
         from google.adk.agents import Agent
         story_call = Agent.call_args_list[0]
         tools = story_call.kwargs.get("tools", [])
-        tool_names = [t.__name__ if hasattr(t, '__name__') else str(t) for t in tools]
-        assert any("generate_image" in name for name in tool_names)
+        assert tools == []
 
-    def test_agent_tools_include_generate_music(self):
-        """Story agent is built with generate_music in its tools."""
+    def test_agent_has_generate_content_config(self):
+        """Story agent has a generate_content_config for native image output."""
         from google.adk.agents import Agent
         story_call = Agent.call_args_list[0]
-        tools = story_call.kwargs.get("tools", [])
-        tool_names = [t.__name__ if hasattr(t, '__name__') else str(t) for t in tools]
-        assert any("generate_music" in name for name in tool_names)
+        config = story_call.kwargs.get("generate_content_config")
+        assert config is not None
 
     def test_runner_is_created_with_correct_app_name(self):
         """Runner is constructed with app_name='emotional_chronicler'."""
@@ -111,17 +109,4 @@ class TestCompanionAgentSetup:
         assert companion_call.kwargs.get("name") == "elora_companion"
 
 
-class TestAgentToolFunctions:
-    """Verify tool functions are the correct async callables."""
 
-    def test_generate_image_is_async_function(self):
-        """generate_image is an async function."""
-        import asyncio
-        from app.tools.imagen import generate_image
-        assert asyncio.iscoroutinefunction(generate_image)
-
-    def test_generate_music_is_async_function(self):
-        """generate_music is an async function."""
-        import asyncio
-        from app.tools.lyria import generate_music
-        assert asyncio.iscoroutinefunction(generate_music)

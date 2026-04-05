@@ -1,8 +1,8 @@
 import { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
-import { AvatarHUD } from './components/AvatarHUD';
-import { SessionSidebar } from './components/SessionSidebar';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { AvatarHUD } from './components/layout/AvatarHUD';
+import { SessionSidebar } from './components/layout/SessionSidebar';
 import { useAuth } from './contexts/AuthContext';
 import { useStoryteller } from './hooks/useStoryteller';
 import { useSessions } from './hooks/useSessions';
@@ -11,7 +11,7 @@ import { SIDEBAR_WIDTH } from './config/layout';
 import type { StoryProposal, ChatMessage } from './hooks/useCompanionChat';
 import type { StoryStatus, StorySection } from './hooks/useStoryteller';
 import type { SessionDetail } from './types/session';
-import { AuthScreen } from './components/AuthScreen';
+import { AuthScreen } from './components/auth/AuthScreen';
 import './App.css';
 
 /* ── Outlet context type — consumed by page components ── */
@@ -48,7 +48,6 @@ function LoadingScreen() {
     <div style={loadingStyles.backdrop}>
       <div style={loadingStyles.spinner} />
       <p style={loadingStyles.text}>Awakening the Chronicler…</p>
-      <style>{`@keyframes authSpinner { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
@@ -91,6 +90,8 @@ function App() {
   } = useCompanionChat({ getIdToken });
 
   const [isSidebarOpen, setSidebarOpen] = useState(true);
+  const location = useLocation();
+  const isStoryPage = location.pathname.startsWith('/story');
 
   // ── New story (reset everything) ──────────────────────────────────────────
   const handleNewStory = useCallback(() => {
@@ -105,10 +106,10 @@ function App() {
     navigate(`/story/${sessionId}`);
   }, [stopStory, navigate]);
 
-  const handleSignOut = () => {
+  const handleSignOut = useCallback(() => {
     stopStory();
     void signOut();
-  };
+  }, [stopStory, signOut]);
 
   /* ── Auth gates ─────────────────────────────────────────── */
   if (loading) return <LoadingScreen />;
@@ -162,16 +163,18 @@ function App() {
         className="app-root"
         style={{ flex: 1, marginLeft: isSidebarOpen ? SIDEBAR_WIDTH : 0, position: 'relative', minHeight: '100vh' }}
       >
-        {/* Top-left title badge */}
-        <header className="app-header" style={{ left: 16 }}>
-          <div className="title-badge">
-            <span className="title-badge__gem">✦</span>
-            <div>
-              <h1 className="app-title">The Emotional Chronicler</h1>
-              <p className="app-subtitle">Illustrated AI Storytelling</p>
+        {/* Top-left title badge — hidden on story pages */}
+        {!isStoryPage && (
+          <header className="app-header" style={{ left: isSidebarOpen ? 16 : 60 }}>
+            <div className="title-badge">
+              <span className="title-badge__gem">✦</span>
+              <div>
+                <h1 className="app-title">The Emotional Chronicler</h1>
+                <p className="app-subtitle">Illustrated AI Storytelling</p>
+              </div>
             </div>
-          </div>
-        </header>
+          </header>
+        )}
 
         {/* Child page rendered here */}
         <Outlet context={outletContext} />

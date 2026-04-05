@@ -70,14 +70,22 @@ sys.modules.setdefault("google.cloud.firestore", _firestore)
 sys.modules.setdefault("google.cloud", MagicMock())
 
 # ── Google Auth (used by lyria.py) ────────────────────────────────────────────
+# NOTE: We force-set these (not setdefault) because the `google` namespace
+# package may already be partially loaded by installed packages like
+# google-cloud-storage, causing setdefault to silently skip our mock.
 _google_auth = MagicMock()
 _mock_credentials = MagicMock()
 _mock_credentials.token = "mock-access-token"
 _mock_credentials.refresh = MagicMock()
 _google_auth.default = MagicMock(return_value=(_mock_credentials, "mock-project"))
-sys.modules.setdefault("google.auth", _google_auth)
-sys.modules.setdefault("google.auth.transport", MagicMock())
-sys.modules.setdefault("google.auth.transport.requests", MagicMock())
+
+_google_auth_transport = MagicMock()
+_google_auth_transport_requests = MagicMock()
+
+sys.modules["google.auth"] = _google_auth
+sys.modules["google.auth.credentials"] = MagicMock()
+sys.modules["google.auth.transport"] = _google_auth_transport
+sys.modules["google.auth.transport.requests"] = _google_auth_transport_requests
 sys.modules.setdefault("google.oauth2", MagicMock())
 
 # ── Now safe to import test dependencies ──────────────────────────────────────

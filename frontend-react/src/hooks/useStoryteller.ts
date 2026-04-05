@@ -153,6 +153,10 @@ export function useStoryteller(options?: StorytellerOptions) {
               break;
             }
 
+            case 'thinking':
+              // Keep-alive ping from backend while model is generating — ignore
+              break;
+
             case 'done':
               setStatus('done');
               break;

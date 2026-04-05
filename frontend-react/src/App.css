@@ -46,7 +46,7 @@ html, body, #root {
 /* ── Header / Title Badge ───────────────────────── */
 .app-header {
   position: fixed;
-  top: 28px;
+  top: 16px;
   left: 32px;
   z-index: 20;
   pointer-events: none;
@@ -149,6 +149,10 @@ html, body, #root {
   50% { opacity: 0.35; }
 }
 
+@keyframes authSpinner {
+  to { transform: rotate(360deg); }
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -205,17 +209,6 @@ html, body, #root {
   100% {
     transform: scale(1.4);
     opacity: 0;
-  }
-}
-
-@keyframes dot-bounce {
-  0%, 80%, 100% {
-    transform: scale(0.6);
-    opacity: 0.4;
-  }
-  40% {
-    transform: scale(1);
-    opacity: 1;
   }
 }
 

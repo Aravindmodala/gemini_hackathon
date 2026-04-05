@@ -30,13 +30,15 @@ vi.mock('../contexts/AuthContext', () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+const getSessionDetailMock = vi.fn().mockResolvedValue({ interactions: [] });
+
 vi.mock('../hooks/useSessions', () => ({
   useSessions: () => ({
     sessions: [],
     loading: false,
     error: null,
     fetchSessions: vi.fn(),
-    getSessionDetail: vi.fn().mockResolvedValue({ interactions: [] }),
+    getSessionDetail: getSessionDetailMock,
     deleteSession: vi.fn(),
     renameSession: vi.fn(),
   }),
@@ -84,6 +86,7 @@ describe('App Integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal('Audio', MockAudio);
+    getSessionDetailMock.mockResolvedValue({ interactions: [] });
   });
 
   afterEach(() => {
@@ -229,6 +232,33 @@ describe('App Integration', () => {
     const img = screen.getByAltText('A fierce dragon');
     expect(img).toBeInTheDocument();
     expect(img).toHaveAttribute('src', '/api/images/dragon.png');
+  });
+
+  it('hydrates saved session with formatted text and image', async () => {
+    getSessionDetailMock.mockResolvedValueOnce({
+      title: 'Saved Chronicle',
+      interactions: [
+        { text: 'Saved story intro\n\nContinues here.' },
+        {
+          role: 'tool',
+          name: 'inline_image',
+          args: { image_url: '/api/images/hero.png', caption: 'Home hero' },
+        },
+      ],
+    });
+    window.history.replaceState({}, '', '/story/saved');
+
+    render(<App />);
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 40));
+    });
+
+    expect(screen.getByText('Saved story intro')).toBeInTheDocument();
+    expect(screen.getByText('Continues here.')).toBeInTheDocument();
+    const savedImg = screen.getByAltText('Home hero');
+    expect(savedImg).toBeInTheDocument();
+    window.history.replaceState({}, '', '/');
   });
 
   // ── New Story resets the view ─────────────────────────────────────────────

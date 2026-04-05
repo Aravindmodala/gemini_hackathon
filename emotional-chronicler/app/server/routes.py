@@ -7,20 +7,24 @@ Routers:
 
 Routes:
   GET  /                        — serve frontend SPA
-  GET  /api/images/{filename}   — serve Imagen 4 generated images
-  GET  /api/music/{filename}    — serve Lyria 2 generated music tracks
+  GET  /api/images/{filename}   — serve generated images (inline from Gemini)
   POST /api/v1/stories          — ADK agent: stream illustrated story (SSE)
 """
 
 import asyncio
+import base64
 import logging
+import mimetypes
+import uuid
+
+import re
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from google.genai import types as genai_types
 from pydantic import BaseModel, field_validator
 
-from app.config import FRONTEND_DIR, IMAGE_CACHE_DIR, MUSIC_CACHE_DIR
+from app.config import FRONTEND_DIR, IMAGE_CACHE_DIR, upload_to_gcs, generate_signed_url
 from app.core.adk_session_manager import ADKSessionManager
 from app.core.agent import runner, APP_NAME
 from app.core.session_query_service import SessionQueryService
@@ -38,8 +42,56 @@ logger = logging.getLogger("chronicler")
 # Flush Elora text to Firestore every ~800 characters to survive interruptions
 ELORA_FLUSH_CHARS = 800
 
+# Reject inline images larger than 20 MB to protect disk and GCS quota
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+# Send an SSE keep-alive ping every N seconds while waiting for the model
+HEARTBEAT_INTERVAL_SECONDS = 5
+
+# Canonical extension map for MIME types Gemini 3 Pro Image Preview emits.
+# Avoids mimetypes.guess_extension() which is OS-registry-dependent on Windows.
+_IMAGE_EXT_MAP = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
 router = APIRouter()
 api_router = APIRouter()
+
+
+def _coerce_image_bytes(raw: bytes | str | None) -> bytes | None:
+    """Normalize image payloads to raw bytes."""
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return base64.b64decode(raw)
+        except Exception:
+            logger.warning("[Image] Failed to decode base64 inline image payload")
+            return None
+    logger.warning("[Image] Unsupported inline image payload type: %s", type(raw).__name__)
+    return None
+
+
+def _extract_inline_image(part: genai_types.Part) -> tuple[bytes, str] | None:
+    """Extract image bytes + mime from an event part when available."""
+    inline_data = getattr(part, "inline_data", None)
+    if not inline_data:
+        return None
+
+    mime = (getattr(inline_data, "mime_type", None) or "").lower()
+    if not mime.startswith("image/"):
+        return None
+
+    image_bytes = _coerce_image_bytes(getattr(inline_data, "data", None))
+    if not image_bytes:
+        return None
+
+    return image_bytes, mime
 
 
 # ── Frontend SPA ──────────────────────────────────────────────────────────────
@@ -69,7 +121,7 @@ class StoryRequest(BaseModel):
         return v
 
 
-# ── Illustrated story generation (ADK + Imagen 4 + Lyria 2) ──────────────────
+# ── Illustrated story generation (ADK + Gemini 3 Pro Image Preview) ──────────
 
 @api_router.post(
     "/stories",
@@ -125,6 +177,11 @@ async def generate_story(request: StoryRequest, http_request: Request):
     async def event_stream():
         elora_text_buffer: list[str] = []
         elora_buffered_chars: int = 0
+        parts_seen: int = 0
+        text_chunks_seen: int = 0
+        images_emitted: int = 0
+        thought_parts_skipped: int = 0
+        companion_context_applied: bool = False
         try:
             logger.info(
                 "[Story] stream_start user_id=%s session_id=%s",
@@ -150,6 +207,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                     )
                     if companion_context:
                         prompt_text = f"{companion_context}\n\nThe traveler is ready. Begin the story now.\n\nOriginal prompt: {request.prompt}"
+                        companion_context_applied = True
                         logger.info(
                             "[Story] companion_context_loaded session_id=%s",
                             request.companion_session_id,
@@ -175,28 +233,122 @@ async def generate_story(request: StoryRequest, http_request: Request):
                 parts=[genai_types.Part(text=prompt_text)],
             )
 
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=new_message,
-            ):
+            # ── Heartbeat + event queue pattern ─────────────────────────
+            # runner.run_async with stream=False can block for 60+ seconds.
+            # We collect events into an asyncio.Queue from a background task
+            # and emit SSE keep-alive pings while waiting.
+            _SENTINEL = object()
+            event_queue: asyncio.Queue = asyncio.Queue()
+
+            async def _collect_events():
+                """Background task: push ADK events into the queue."""
+                try:
+                    async for event in runner.run_async(
+                        user_id=user_id,
+                        session_id=session_id,
+                        new_message=new_message,
+                    ):
+                        await event_queue.put(event)
+                finally:
+                    await event_queue.put(_SENTINEL)
+
+            collector = asyncio.create_task(_collect_events())
+
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        event_queue.get(), timeout=HEARTBEAT_INTERVAL_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    # No event yet — send a keep-alive ping
+                    yield format_sse_event({"type": "thinking"})
+                    continue
+
+                if event is _SENTINEL:
+                    # Check if collector raised an exception
+                    if collector.done() and collector.exception():
+                        raise collector.exception()
+                    break
+
                 if not event.content or not event.content.parts:
                     continue
 
                 for part in event.content.parts:
+                    parts_seen += 1
+                    logger.debug(
+                        "[Story] part_received idx=%d has_text=%s has_inline_data=%s mime=%s has_function_response=%s thought=%s",
+                        parts_seen,
+                        bool(getattr(part, "text", None)),
+                        bool(getattr(part, "inline_data", None)),
+                        getattr(getattr(part, "inline_data", None), "mime_type", None),
+                        bool(getattr(part, "function_response", None)),
+                        bool(getattr(part, "thought", False)),
+                    )
+                    # Skip model thinking/reasoning parts — not story content
+                    if getattr(part, "thought", False):
+                        thought_parts_skipped += 1
+                        continue
+
                     # ── Text chunk ────────────────────────────
-                    if part.text:
-                        yield format_sse_event({"type": "text", "chunk": part.text})
-                        elora_text_buffer.append(part.text)
-                        elora_buffered_chars += len(part.text)
+                    text_value = getattr(part, "text", None)
+                    if text_value:
+                        text_chunks_seen += 1
+                        yield format_sse_event({"type": "text", "chunk": text_value})
+                        elora_text_buffer.append(text_value)
+                        elora_buffered_chars += len(text_value)
                         # Flush to Firestore periodically so content survives interruptions
                         if store and elora_buffered_chars >= ELORA_FLUSH_CHARS:
                             await asyncio.to_thread(store.log_interaction, "elora", "".join(elora_text_buffer))
                             elora_text_buffer.clear()
                             elora_buffered_chars = 0
 
-                    # ── Tool response (image or music) ────────
-                    elif part.function_response:
+                    # ── Inline image (native Gemini 3 Pro Image Preview output) ──
+                    extracted = _extract_inline_image(part)
+                    if extracted:
+                        image_bytes, mime = extracted
+
+                        # Size guard — skip oversized images
+                        if len(image_bytes) > MAX_IMAGE_BYTES:
+                            logger.warning("[Image] Oversized inline image skipped (%d bytes)", len(image_bytes))
+                            continue
+
+                        # Derive extension and content type from the model's MIME type
+                        ext = _IMAGE_EXT_MAP.get(mime, ".bin")
+                        filename = f"{uuid.uuid4().hex}{ext}"
+
+                        # Save to local cache
+                        filepath = IMAGE_CACHE_DIR / filename
+                        await asyncio.to_thread(filepath.write_bytes, image_bytes)
+                        logger.info(
+                            "[Image] Generated inline image: %s (%d bytes, %s) session_id=%s",
+                            filename, len(image_bytes), mime, session_id,
+                        )
+
+                        # Upload to GCS for persistent storage (organized by session)
+                        blob_path = f"images/{session_id}/{filename}"
+                        image_url = f"/api/v1/assets/images/{session_id}/{filename}"
+                        try:
+                            await asyncio.to_thread(
+                                upload_to_gcs, blob_path, image_bytes, mime
+                            )
+                            logger.info("[Image] Uploaded to GCS: %s", blob_path)
+                        except Exception as gcs_err:
+                            logger.warning("[Image] GCS upload failed, will serve locally: %s", gcs_err)
+
+                        yield format_sse_event({
+                            "type": "image",
+                            "url": image_url,
+                            "caption": "",
+                        })
+                        images_emitted += 1
+                        if store:
+                            await asyncio.to_thread(store.log_tool_call, "inline_image", {
+                                "image_url": image_url,
+                                "blob_path": blob_path,
+                            })
+
+                    # ── Tool response (music, or legacy image) ────────
+                    if part.function_response:
                         result = part.function_response.response or {}
                         fn_name = part.function_response.name
 
@@ -206,25 +358,13 @@ async def generate_story(request: StoryRequest, http_request: Request):
                             )
                             continue
 
-                        if fn_name == "generate_image" and "image_url" in result:
-                            yield format_sse_event({
-                                "type": "image",
-                                "url": result["image_url"],
-                                "caption": result.get("caption", ""),
-                            })
-                            # Log image tool call to Firestore
-                            if store:
-                                await asyncio.to_thread(store.log_tool_call, fn_name, result)
+                        # Log any tool call to Firestore
+                        if store:
+                            await asyncio.to_thread(store.log_tool_call, fn_name, result)
 
-                        elif fn_name == "generate_music" and "audio_url" in result:
-                            yield format_sse_event({
-                                "type": "music",
-                                "url": result["audio_url"],
-                                "duration": result.get("duration_seconds", 33),
-                            })
-                            # Log music tool call to Firestore
-                            if store:
-                                await asyncio.to_thread(store.log_tool_call, fn_name, result)
+            # Ensure collector is done (it should be, since _SENTINEL was received)
+            if not collector.done():
+                collector.cancel()
 
             # Flush accumulated Elora text to Firestore
             if store and elora_text_buffer:
@@ -235,13 +375,30 @@ async def generate_story(request: StoryRequest, http_request: Request):
                 await asyncio.to_thread(store.end_session)
 
             logger.info(
-                "[Story] stream_complete user_id=%s session_id=%s",
+                "[Story] stream_complete user_id=%s session_id=%s parts_seen=%d thought_parts_skipped=%d text_chunks=%d images=%d companion_context=%s",
                 user_id,
                 session_id,
+                parts_seen,
+                thought_parts_skipped,
+                text_chunks_seen,
+                images_emitted,
+                companion_context_applied,
             )
+            if images_emitted == 0:
+                logger.warning(
+                    "[Story] no_images_emitted session_id=%s model=%s prompt_len=%d companion_context=%s",
+                    session_id,
+                    getattr(runner.agent, "model", "unknown"),
+                    len(request.prompt),
+                    companion_context_applied,
+                )
             yield format_sse_event({"type": "done"})
 
         except Exception as e:
+            # Cancel collector if still running
+            if 'collector' in locals() and not collector.done():
+                collector.cancel()
+
             # Still flush whatever text we have and end the session
             if store:
                 if elora_text_buffer:
@@ -281,30 +438,50 @@ async def generate_story(request: StoryRequest, http_request: Request):
     },
 )
 async def serve_image(filename: str):
-    """Serve an Imagen 4 generated illustration."""
+    """Serve a generated illustration from local cache (legacy fallback)."""
     path = (IMAGE_CACHE_DIR / filename).resolve()
     if not path.is_relative_to(IMAGE_CACHE_DIR.resolve()):
         raise HTTPException(status_code=400, detail="Invalid filename")
     if not path.exists():
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(str(path), media_type="image/png")
+    media_type, _ = mimetypes.guess_type(str(path))
+    return FileResponse(str(path), media_type=media_type or "application/octet-stream")
 
 
-@router.get(
-    "/api/music/{filename}",
-    summary="Serve a generated music track",
+# Validation patterns for asset endpoint path parameters
+_HEX_RE = re.compile(r"^[0-9a-f]{32}$")
+_FILENAME_RE = re.compile(r"^[0-9a-f]{32}\.\w{2,4}$")
+
+
+@api_router.get(
+    "/assets/images/{session_id}/{filename}",
+    summary="Serve a story image via signed URL redirect",
     tags=["assets"],
     responses={
-        200: {"description": "Audio file (WAV or MP3)"},
-        404: {"description": "Music file not found"},
+        302: {"description": "Redirect to a short-lived signed GCS URL"},
+        200: {"description": "Image served from local cache (fallback)"},
+        400: {"description": "Invalid path parameters"},
+        404: {"description": "Image not found"},
     },
 )
-async def serve_music(filename: str):
-    """Serve a Lyria 2 generated music track."""
-    path = (MUSIC_CACHE_DIR / filename).resolve()
-    if not path.is_relative_to(MUSIC_CACHE_DIR.resolve()):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Music not found")
-    media_type = "audio/wav" if filename.endswith(".wav") else "audio/mpeg"
-    return FileResponse(str(path), media_type=media_type)
+async def serve_asset_image(session_id: str, filename: str):
+    """Serve a story image: local cache first, GCS signed URL redirect as fallback."""
+    # Validate path parameters to prevent traversal
+    if not _HEX_RE.match(session_id) or not _FILENAME_RE.match(filename):
+        raise HTTPException(status_code=400, detail="Invalid path parameters")
+
+    # Fast path: serve from local cache if available
+    local_path = (IMAGE_CACHE_DIR / filename).resolve()
+    if local_path.is_relative_to(IMAGE_CACHE_DIR.resolve()) and local_path.exists():
+        media_type, _ = mimetypes.guess_type(str(local_path))
+        return FileResponse(str(local_path), media_type=media_type or "application/octet-stream")
+
+    # Generate a short-lived signed URL and redirect
+    blob_path = f"images/{session_id}/{filename}"
+    try:
+        signed_url = await asyncio.to_thread(generate_signed_url, blob_path)
+    except Exception as e:
+        logger.warning("[Asset] Failed to generate signed URL for %s: %s", blob_path, e)
+        raise HTTPException(status_code=404, detail="Image not found") from e
+
+    return RedirectResponse(url=signed_url, status_code=302)

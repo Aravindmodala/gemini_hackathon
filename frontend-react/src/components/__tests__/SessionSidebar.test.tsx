@@ -6,7 +6,7 @@
  */
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SessionSidebar } from '../SessionSidebar';
+import { SessionSidebar } from '../layout/SessionSidebar';
 import type { Session } from '../../types/session';
 
 // ── Helpers ─────────────────────────────────────────────────
