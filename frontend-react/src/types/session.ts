@@ -6,6 +6,7 @@ export interface Session {
   updated_at: string | null;
   interaction_count: number;
   preview: string;
+  thumbnail_url?: string | null;
 }
 
 export interface SessionDetail extends Session {

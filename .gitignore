@@ -32,3 +32,8 @@ frontend-react/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local tooling artifacts and generated assets
+.kombai/resources/
+emotional-chronicler/_image_cache/
+tmp/

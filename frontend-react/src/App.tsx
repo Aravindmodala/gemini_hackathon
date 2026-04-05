@@ -102,11 +102,13 @@ function App() {
   const isStoryPage = location.pathname.startsWith('/story');
   const lastFetchedSessionIdRef = useRef<string | null>(null);
   const lastPatchedTitleKeyRef = useRef<string>('');
+  const lastPatchedThumbnailRef = useRef<string>('');
 
   useEffect(() => {
     if (!sessionId) {
       lastFetchedSessionIdRef.current = null;
       lastPatchedTitleKeyRef.current = '';
+      lastPatchedThumbnailRef.current = '';
       return;
     }
 
@@ -134,6 +136,19 @@ function App() {
       updated_at: new Date().toISOString(),
     });
   }, [sessionId, storyTitle, updateSessionInState]);
+
+  // ── Capture first image from SSE → update sidebar thumbnail ───────────────
+  useEffect(() => {
+    if (!sessionId) return;
+    const firstImage = sections.find(s => s.type === 'image');
+    if (!firstImage || firstImage.type !== 'image') return;
+
+    const patchKey = `${sessionId}:${firstImage.url}`;
+    if (lastPatchedThumbnailRef.current === patchKey) return;
+
+    lastPatchedThumbnailRef.current = patchKey;
+    updateSessionInState(sessionId, { thumbnail_url: firstImage.url });
+  }, [sessionId, sections, updateSessionInState]);
 
   // ── New story (reset everything) ──────────────────────────────────────────
   const handleNewStory = useCallback(() => {

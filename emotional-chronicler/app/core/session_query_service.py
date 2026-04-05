@@ -18,6 +18,20 @@ logger = logging.getLogger("chronicler")
 _OLD_GCS_PREFIX = f"https://storage.googleapis.com/{GCS_BUCKET}/"
 
 
+def _get_thumbnail(interactions: list[dict]) -> str | None:
+    """Return the URL of the first inline image in a session's interactions."""
+    for interaction in interactions:
+        if interaction.get("role") != "tool":
+            continue
+        if interaction.get("name") not in ("inline_image", "generate_image"):
+            continue
+        args = interaction.get("args", {})
+        url = args.get("image_url") or args.get("url")
+        if url:
+            return url
+    return None
+
+
 def _rewrite_legacy_image_urls(interactions: list[dict]) -> list[dict]:
     """Rewrite old-format GCS public URLs to the new asset endpoint paths.
 
@@ -80,14 +94,16 @@ class SessionQueryService:
             sessions = []
             for doc in page_docs:
                 data = doc.to_dict()
+                interactions = _rewrite_legacy_image_urls(data.get("interactions", []))
                 sessions.append({
                     "session_id": doc.id,
                     "title": data.get("title", "Untitled Story"),
                     "status": data.get("status", "unknown"),
                     "created_at": _safe_iso(data.get("created_at")),
                     "updated_at": _safe_iso(data.get("updated_at")),
-                    "interaction_count": len(data.get("interactions", [])),
-                    "preview": _get_preview(data.get("interactions", [])),
+                    "interaction_count": len(interactions),
+                    "preview": _get_preview(interactions),
+                    "thumbnail_url": _get_thumbnail(interactions),
                 })
 
             next_cursor = page_docs[-1].id if has_next and page_docs else None
