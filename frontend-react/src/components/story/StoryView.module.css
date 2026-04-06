@@ -448,3 +448,23 @@
   .prose { font-size: 16px; line-height: 1.95; }
   .heroZone { height: clamp(220px, 40vh, 360px); }
 }
+
+/* ── Image placeholder skeleton ────────────────────────────────── */
+.imgPlaceholder {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    rgba(26, 10, 58, 0.9) 25%,
+    rgba(45, 18, 87, 0.7) 50%,
+    rgba(26, 10, 58, 0.9) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

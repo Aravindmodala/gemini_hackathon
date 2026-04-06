@@ -257,6 +257,26 @@ export function StoryView({
               });
             }
 
+            /* ── Image placeholder skeleton (shown while image generates) ── */
+            if (section.type === 'image_placeholder') {
+              // Hide orphan placeholders once generation is complete
+              if (status === 'done') return null;
+              return (
+                <div
+                  key={i}
+                  className={`${styles.animSection} ${styles.sceneBlock}`}
+                  style={{ transitionDelay: `${delay}s` }}
+                >
+                  <div className={styles.separator} aria-hidden>· · ·</div>
+                  <figure className={styles.figure}>
+                    <div className={styles.imgWrap}>
+                      <div className={styles.imgPlaceholder} aria-label="Image loading…" />
+                    </div>
+                  </figure>
+                </div>
+              );
+            }
+
             /* ── Scene image ────────────────────────────────────────────── */
             if (section.type === 'image') {
               return (

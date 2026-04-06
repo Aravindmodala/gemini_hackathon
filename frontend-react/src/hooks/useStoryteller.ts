@@ -9,6 +9,7 @@ export type StoryStatus = 'idle' | 'generating' | 'done' | 'error';
 export type StorySection =
   | { type: 'text'; content: string }
   | { type: 'image'; url: string; caption: string }
+  | { type: 'image_placeholder'; index: number }
   | { type: 'music'; url: string; duration: number };
 
 export interface StorytellerOptions {
@@ -134,12 +135,41 @@ export function useStoryteller(options?: StorytellerOptions) {
               appendText(event.chunk as string);
               break;
 
-            case 'image': {
-              const imgUrl = resolveAssetUrl(event.url as string);
+            case 'image_placeholder': {
+              const idx = event.index as number;
               setSections(prev => [
                 ...prev,
-                { type: 'image', url: imgUrl, caption: (event.caption as string) ?? '' },
+                { type: 'image_placeholder', index: idx },
               ]);
+              break;
+            }
+
+            case 'image': {
+              const imgUrl = resolveAssetUrl(event.url as string);
+              const idx = event.index as number | undefined;
+              setSections(prev => {
+                if (idx !== undefined) {
+                  // Replace the matching placeholder in-place so the image
+                  // appears at the correct position in the story, not at the end.
+                  const placeholderPos = prev.findIndex(
+                    s => s.type === 'image_placeholder' && s.index === idx
+                  );
+                  if (placeholderPos !== -1) {
+                    const next = [...prev];
+                    next[placeholderPos] = {
+                      type: 'image',
+                      url: imgUrl,
+                      caption: (event.caption as string) ?? '',
+                    };
+                    return next;
+                  }
+                }
+                // Fallback: append (no matching placeholder, or no index)
+                return [
+                  ...prev,
+                  { type: 'image', url: imgUrl, caption: (event.caption as string) ?? '' },
+                ];
+              });
               break;
             }
 

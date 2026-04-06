@@ -60,6 +60,10 @@ _TITLE_MARKER_PREFIX = "[[TITLE:"
 _TITLE_MARKER_SUFFIX = "]]"
 _MAX_TITLE_BUFFER_CHARS = 1200
 
+_IMAGE_MARKER = "[[IMAGE]]"
+_IMAGE_MARKER_LEN = len(_IMAGE_MARKER)   # 9
+_IMAGE_TAIL_MAX = _IMAGE_MARKER_LEN - 1  # 8 — max chars of a partial marker
+
 router = APIRouter()
 api_router = APIRouter()
 
@@ -154,6 +158,41 @@ def _extract_title_marker_from_buffer(buffer: str) -> tuple[str | None, str, boo
     parsed_title = _sanitize_title(raw_title)
     visible_text = trimmed[marker_end + len(_TITLE_MARKER_SUFFIX):].lstrip("\r\n")
     return parsed_title or None, visible_text, True
+
+
+def _split_text_on_image_markers(
+    text: str, tail: str
+) -> tuple[list[str | None], str]:
+    """Split incoming text chunk on [[IMAGE]] markers, handling partial markers.
+
+    Args:
+        text: The incoming text chunk from the model.
+        tail: Leftover partial-marker fragment from the previous chunk (≤8 chars).
+
+    Returns:
+        (segments, new_tail) where segments alternates between str (text) and
+        None (image placeholder position), and new_tail is any unresolved
+        partial marker fragment to carry into the next call.
+    """
+    combined = tail + text
+    parts = combined.split(_IMAGE_MARKER)
+
+    # Check if the tail of the last segment is a partial marker prefix
+    last = parts[-1]
+    new_tail = ""
+    for i in range(_IMAGE_TAIL_MAX, 0, -1):
+        if last.endswith(_IMAGE_MARKER[:i]):
+            new_tail = _IMAGE_MARKER[:i]
+            parts[-1] = last[:-i]
+            break
+
+    # Build result: text segments separated by None (marker positions)
+    segments: list[str | None] = []
+    for idx, part in enumerate(parts):
+        segments.append(part)          # text segment (may be empty string)
+        if idx < len(parts) - 1:
+            segments.append(None)      # image placeholder position
+    return segments, new_tail
 
 
 async def _persist_and_emit_title(
@@ -268,6 +307,9 @@ async def generate_story(request: StoryRequest, http_request: Request):
         images_emitted: int = 0
         thought_parts_skipped: int = 0
         companion_context_applied: bool = False
+        image_text_tail: str = ""    # partial [[IMAGE]] marker buffered across chunks
+        placeholder_count: int = 0   # number of [[IMAGE]] markers emitted as placeholders
+        image_fill_count: int = 0    # number of actual images received (matches placeholder index)
         try:
             logger.info(
                 "[Story] stream_start user_id=%s session_id=%s",
@@ -420,9 +462,23 @@ async def generate_story(request: StoryRequest, http_request: Request):
 
                         if visible_text:
                             text_chunks_seen += 1
-                            yield format_sse_event({"type": "text", "chunk": visible_text})
-                            elora_text_buffer.append(visible_text)
-                            elora_buffered_chars += len(visible_text)
+                            # Split on [[IMAGE]] markers, emitting placeholders at the
+                            # correct positions so the frontend can reserve image slots
+                            # even though actual image data arrives later in the stream.
+                            segments, image_text_tail = _split_text_on_image_markers(
+                                visible_text, image_text_tail
+                            )
+                            for seg in segments:
+                                if seg is None:
+                                    yield format_sse_event({
+                                        "type": "image_placeholder",
+                                        "index": placeholder_count,
+                                    })
+                                    placeholder_count += 1
+                                elif seg:
+                                    yield format_sse_event({"type": "text", "chunk": seg})
+                                    elora_text_buffer.append(seg)
+                                    elora_buffered_chars += len(seg)
                         # Flush to Firestore periodically so content survives interruptions
                         if store and elora_buffered_chars >= ELORA_FLUSH_CHARS:
                             await asyncio.to_thread(store.log_interaction, "elora", "".join(elora_text_buffer))
@@ -466,12 +522,15 @@ async def generate_story(request: StoryRequest, http_request: Request):
                             "type": "image",
                             "url": image_url,
                             "caption": "",
+                            "index": image_fill_count,
                         })
                         images_emitted += 1
+                        image_fill_count += 1
                         if store:
                             await asyncio.to_thread(store.log_tool_call, "inline_image", {
                                 "image_url": image_url,
                                 "blob_path": blob_path,
+                                "position_index": image_fill_count - 1,
                             })
 
                     # â”€â”€ Tool response (music, or legacy image) â”€â”€â”€â”€â”€â”€â”€â”€
@@ -492,6 +551,12 @@ async def generate_story(request: StoryRequest, http_request: Request):
             # Ensure collector is done (it should be, since _SENTINEL was received)
             if not collector.done():
                 collector.cancel()
+
+            # Flush any partial [[IMAGE]] marker tail that never resolved
+            if image_text_tail:
+                yield format_sse_event({"type": "text", "chunk": image_text_tail})
+                elora_text_buffer.append(image_text_tail)
+                image_text_tail = ""
 
             # Flush accumulated Elora text to Firestore
             if store and elora_text_buffer:
