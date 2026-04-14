@@ -357,6 +357,72 @@
   pointer-events: none;
 }
 
+.imgFallback {
+  width: 100%;
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: clamp(18px, 2vw, 32px);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(5, 5, 15, 0.92), rgba(30, 27, 61, 0.96));
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  color: rgba(240, 232, 216, 0.9);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+}
+
+.heroFallback {
+  height: 100%;
+  min-height: 100%;
+  border-radius: 0;
+  border: none;
+  background: linear-gradient(135deg, rgba(1, 1, 10, 0.9), rgba(6, 6, 22, 0.98));
+  box-shadow:
+    inset 0 0 36px rgba(0, 0, 0, 0.85),
+    0 20px 80px rgba(0, 0, 0, 0.9);
+}
+
+.sceneFallback {
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow:
+    inset 0 0 28px rgba(2, 3, 10, 0.8),
+    0 20px 80px rgba(0, 0, 0, 0.75),
+    0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.fallbackContent {
+  max-width: 320px;
+}
+
+.fallbackIcon {
+  width: 42px;
+  height: 42px;
+  display: block;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: rgba(147, 107, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.3), 0 0 30px rgba(147, 107, 255, 0.25);
+}
+
+.fallbackTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #f4ede0;
+}
+
+.fallbackHint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: rgba(240, 232, 216, 0.6);
+}
+
 .caption {
   font-family: var(--font-display, 'Cinzel', serif);
   font-size: 10px;

@@ -326,6 +326,56 @@ class TestGetPreviousContext:
 
 # ── SessionQueryService: list_sessions ─────────────────────────
 
+class TestRewriteLegacyImageUrls:
+    """Tests for _rewrite_legacy_image_urls()."""
+
+    def test_rewrites_old_public_gcs_url_to_assets_path(self):
+        from app.config import GCS_BUCKET
+        from app.core.session_query_service import _rewrite_legacy_image_urls
+
+        interactions = [{
+            "role": "tool",
+            "name": "generated_image",
+            "args": {
+                "image_url": f"https://storage.googleapis.com/{GCS_BUCKET}/images/sess-1/abc.png",
+            },
+        }]
+
+        rewritten = _rewrite_legacy_image_urls(interactions, session_id="session-ignored")
+
+        assert rewritten[0]["args"]["image_url"] == "/api/v1/assets/images/sess-1/abc.png"
+
+    def test_rewrites_local_cache_url_using_blob_path_when_available(self):
+        from app.core.session_query_service import _rewrite_legacy_image_urls
+
+        interactions = [{
+            "role": "tool",
+            "name": "generated_image",
+            "args": {
+                "image_url": "/api/images/abc.png",
+                "blob_path": "images/sess-2/abc.png",
+            },
+        }]
+
+        rewritten = _rewrite_legacy_image_urls(interactions, session_id="session-unused")
+
+        assert rewritten[0]["args"]["image_url"] == "/api/v1/assets/images/sess-2/abc.png"
+
+    def test_rewrites_local_cache_url_using_session_id_fallback(self):
+        from app.core.session_query_service import _rewrite_legacy_image_urls
+
+        interactions = [{
+            "role": "tool",
+            "name": "generated_image",
+            "args": {
+                "image_url": "/api/images/abc.png",
+            },
+        }]
+
+        rewritten = _rewrite_legacy_image_urls(interactions, session_id="sess-fallback")
+
+        assert rewritten[0]["args"]["image_url"] == "/api/v1/assets/images/sess-fallback/abc.png"
+
 class TestListSessions:
     """Tests for SessionQueryService.list_sessions()."""
 
@@ -553,3 +603,93 @@ class TestGetPreview:
         ]
         result = _get_preview(interactions)
         assert result == "Play music"
+
+
+class TestImageRegenerationMetadata:
+    """Tests for SessionQueryService image regeneration helpers."""
+
+    def test_find_image_interaction_for_asset_resolves_owner_and_prompt(self):
+        from app.core.session_query_service import SessionQueryService
+        if not hasattr(SessionQueryService, "find_image_interaction_for_asset"):
+            pytest.skip("find_image_interaction_for_asset helper not present")
+
+        with patch("app.core.session_query_service._get_db") as mock_get_db:
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+
+            mock_doc = MagicMock()
+            mock_doc.id = "abcdef01234567890abcdef012345678"
+            mock_doc.to_dict.return_value = {
+                "interactions": [
+                    {
+                        "role": "tool",
+                        "name": "generated_image",
+                        "args": {
+                            "blob_path": "images/abcdef01234567890abcdef012345678/abcdef01234567890abcdef012345678.png",
+                            "image_prompt": "starry valley",
+                        },
+                    }
+                ]
+            }
+            mock_doc.reference.parent.parent.id = "owner-123"
+            mock_db.collection_group.return_value.stream.return_value = [mock_doc]
+
+            result = SessionQueryService.find_image_interaction_for_asset(
+                "abcdef01234567890abcdef012345678",
+                "abcdef01234567890abcdef012345678.png",
+                "images/abcdef01234567890abcdef012345678/abcdef01234567890abcdef012345678.png",
+            )
+
+            assert result is not None
+            assert result["user_id"] == "owner-123"
+            assert result["image_prompt"] == "starry valley"
+
+    def test_mark_image_interaction_regenerated_updates_interaction_args(self):
+        from app.core.session_query_service import SessionQueryService
+        if not hasattr(SessionQueryService, "mark_image_interaction_regenerated"):
+            pytest.skip("mark_image_interaction_regenerated helper not present")
+
+        with patch("app.core.session_query_service._get_db") as mock_get_db, \
+             patch("app.core.session_query_service._session_doc_ref") as mock_doc_ref_builder, \
+             patch("app.core.session_query_service.firestore.transactional", side_effect=lambda fn: fn):
+            mock_db = MagicMock()
+            mock_get_db.return_value = mock_db
+            mock_txn = MagicMock()
+            mock_db.transaction.return_value = mock_txn
+
+            mock_doc_ref = MagicMock()
+            mock_doc_ref_builder.return_value = mock_doc_ref
+
+            snapshot = MagicMock()
+            snapshot.exists = True
+            snapshot.to_dict.return_value = {
+                "interactions": [
+                    {
+                        "role": "tool",
+                        "name": "generated_image",
+                        "args": {
+                            "blob_path": "images/abcdef01234567890abcdef012345678/abcdef01234567890abcdef012345678.png",
+                            "image_url": "/api/images/abcdef01234567890abcdef012345678.png",
+                        },
+                    }
+                ]
+            }
+            mock_doc_ref.get.return_value = snapshot
+
+            ok = SessionQueryService.mark_image_interaction_regenerated(
+                user_id="owner-123",
+                session_id="abcdef01234567890abcdef012345678",
+                filename="abcdef01234567890abcdef012345678.png",
+                blob_path="images/abcdef01234567890abcdef012345678/abcdef01234567890abcdef012345678.png",
+                image_prompt="starry valley",
+                mime_type="image/png",
+            )
+
+            assert ok is True
+            assert mock_txn.update.called
+            interactions = mock_txn.update.call_args[0][1]["interactions"]
+            updated_args = interactions[0]["args"]
+            assert updated_args["regenerated"] is True
+            assert updated_args["image_prompt"] == "starry valley"
+            assert updated_args["blob_path"].endswith(".png")
+

@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ImgHTMLAttributes, ReactElement } from 'react';
 import type { StorySection, StoryStatus } from '../../hooks/useStoryteller';
 import {
   formatStoryText,
@@ -25,6 +25,7 @@ interface StoryViewProps {
   title?: string;
   sidebarOffset?: number;
   cardMode?: boolean;
+  promoteFirstImageToHero?: boolean;
 }
 
 function formatDuration(seconds: number): string {
@@ -49,6 +50,39 @@ function renderSegments(segments: InlineChunk[]) {
   });
 }
 
+interface StoryImageProps extends Omit<ImgHTMLAttributes<HTMLImageElement>, 'children'> {
+  src: string;
+  renderFallback: () => ReactElement;
+}
+
+function StoryImage({ src, renderFallback, onError, ...imgProps }: StoryImageProps) {
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    setHasError(false);
+  }, [src]);
+
+  const handleError: ImgHTMLAttributes<HTMLImageElement>['onError'] = useCallback(
+    event => {
+      setHasError(true);
+      onError?.(event);
+    },
+    [onError],
+  );
+
+  if (hasError) {
+    return renderFallback();
+  }
+
+  return (
+    <img
+      {...imgProps}
+      src={src}
+      onError={handleError}
+    />
+  );
+}
+
 export function StoryView({
   sections,
   status,
@@ -56,6 +90,7 @@ export function StoryView({
   title,
   sidebarOffset,
   cardMode,
+  promoteFirstImageToHero = false,
 }: StoryViewProps) {
   const scrollRef   = useRef<HTMLDivElement>(null);
   const heroImgRef  = useRef<HTMLDivElement>(null);
@@ -63,7 +98,9 @@ export function StoryView({
   const [readProgress, setReadProgress] = useState(0);
 
   // ── Hero image: first image section becomes the full-bleed hero ──────────
-  const heroIndex = sections.findIndex(s => s.type === 'image');
+  const heroIndex = promoteFirstImageToHero
+    ? sections.findIndex(s => s.type === 'image')
+    : -1;
   const rawHero   = heroIndex !== -1 ? sections[heroIndex] : null;
   const heroImage = rawHero?.type === 'image' ? rawHero : null;
 
@@ -141,11 +178,20 @@ export function StoryView({
         {heroImage && (
           <div className={styles.heroZone}>
             <div className={styles.heroImgWrap} ref={heroImgRef}>
-              <img
+              <StoryImage
                 src={heroImage.url}
                 alt={heroImage.caption || 'Story illustration'}
                 className={styles.heroImg}
                 draggable={false}
+                renderFallback={() => (
+                  <div className={`${styles.imgFallback} ${styles.heroFallback}`}>
+                    <div className={styles.fallbackContent}>
+                      <span className={styles.fallbackIcon} aria-hidden />
+                      <p className={styles.fallbackTitle}>Image unavailable</p>
+                      <p className={styles.fallbackHint}>We can't display this illustration right now.</p>
+                    </div>
+                  </div>
+                )}
               />
             </div>
             <div className={styles.heroOverlay} />
@@ -268,11 +314,20 @@ export function StoryView({
                   <div className={styles.separator} aria-hidden>· · ·</div>
                   <figure className={styles.figure}>
                     <div className={styles.imgWrap}>
-                      <img
+                      <StoryImage
                         src={section.url}
                         alt={section.caption || 'Story scene'}
                         loading="lazy"
                         className={styles.sceneImg}
+                        renderFallback={() => (
+                          <div className={`${styles.imgFallback} ${styles.sceneFallback}`}>
+                            <div className={styles.fallbackContent}>
+                              <span className={styles.fallbackIcon} aria-hidden />
+                              <p className={styles.fallbackTitle}>Scene unavailable</p>
+                              <p className={styles.fallbackHint}>We can't load this illustration right now.</p>
+                            </div>
+                          </div>
+                        )}
                       />
                       <div className={styles.imgVignette} />
                     </div>

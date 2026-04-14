@@ -9,14 +9,41 @@ export function useSessions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const fetchWithAuthRetry = useCallback(
+    async (input: string, init?: RequestInit): Promise<Response> => {
+      let token = await getIdToken();
+      let res = await fetch(input, {
+        ...init,
+        headers: {
+          ...(init?.headers || {}),
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (res.status === 401) {
+        await wait(1200);
+        token = await getIdToken(true);
+        res = await fetch(input, {
+          ...init,
+          headers: {
+            ...(init?.headers || {}),
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      }
+
+      return res;
+    },
+    [getIdToken]
+  );
+
   const fetchSessions = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const token = await getIdToken();
-      const res = await fetch(`${API_BASE}/api/v1/sessions`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuthRetry(`${API_BASE}/api/v1/sessions`);
       if (!res.ok) throw new Error('Failed to fetch sessions');
       const data = await res.json();
       setSessions(prev => {
@@ -48,29 +75,25 @@ export function useSessions() {
     } finally {
       setLoading(false);
     }
-  }, [getIdToken]);
+  }, [fetchWithAuthRetry]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
     try {
-      const token = await getIdToken();
-      const res = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}`, {
+      const res = await fetchWithAuthRetry(`${API_BASE}/api/v1/sessions/${sessionId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to delete session');
       setSessions(prev => prev.filter(s => s.session_id !== sessionId));
     } catch (err: any) {
       setError(err.message);
     }
-  }, [getIdToken]);
+  }, [fetchWithAuthRetry]);
 
   const renameSession = useCallback(async (sessionId: string, title: string) => {
     try {
-      const token = await getIdToken();
-      const res = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}`, {
+      const res = await fetchWithAuthRetry(`${API_BASE}/api/v1/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ title }),
@@ -82,15 +105,12 @@ export function useSessions() {
     } catch (err: any) {
       setError(err.message);
     }
-  }, [getIdToken]);
+  }, [fetchWithAuthRetry]);
 
   const getSessionDetail = useCallback(async (sessionId: string): Promise<SessionDetail> => {
     try {
       setError(null);
-      const token = await getIdToken();
-      const res = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetchWithAuthRetry(`${API_BASE}/api/v1/sessions/${sessionId}`);
       if (!res.ok) throw new Error('Failed to fetch session detail');
       const data = await res.json();
       return data.data as SessionDetail;
@@ -98,7 +118,7 @@ export function useSessions() {
       setError(err.message);
       throw err;
     }
-  }, [getIdToken]);
+  }, [fetchWithAuthRetry]);
 
   const updateSessionInState = useCallback(
     (sessionId: string, patch: Partial<Session>) => {

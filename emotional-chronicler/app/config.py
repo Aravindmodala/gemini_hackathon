@@ -32,7 +32,11 @@ os.environ.setdefault("GOOGLE_CLOUD_LOCATION", LOCATION)
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "true")
 
 # ── Models ───────────────────────────────────────────────────
-STORY_MODEL = os.environ.get("STORY_MODEL", "gemini-3-pro-image-preview")  # ADK agent brain (native text+image output)
+# ── Power Couple: two-model pipeline ────────────────────────
+NARRATIVE_MODEL = os.environ.get("NARRATIVE_MODEL", "gemini-3.1-flash-lite-preview")
+VISUAL_MODEL = os.environ.get("VISUAL_MODEL", "gemini-3-pro-image-preview")
+VISUAL_TIMEOUT_SECONDS = float(os.environ.get("VISUAL_TIMEOUT_SECONDS", "75"))
+STORY_MODEL = NARRATIVE_MODEL  # alias for backward compat
 COMPANION_MODEL = os.environ.get("COMPANION_MODEL", "gemini-2.0-flash")  # Pre-story companion
 
 # ── Firebase Authentication ───────────────────────────────────
@@ -88,4 +92,20 @@ def generate_signed_url(blob_path: str, expiration_minutes: int = 15) -> str:
         expiration=datetime.timedelta(minutes=expiration_minutes),
         method="GET",
     )
+
+
+# ── GenAI client (for Visual Engine direct calls) ───────────
+from google import genai
+
+_genai_client: genai.Client | None = None
+
+
+def get_genai_client() -> genai.Client:
+    """Lazy-initialize the GenAI client for direct model calls (e.g., visual engine)."""
+    global _genai_client
+    if _genai_client is None:
+        _genai_client = genai.Client(
+            vertexai=True, project=PROJECT_ID, location=LOCATION
+        )
+    return _genai_client
 
