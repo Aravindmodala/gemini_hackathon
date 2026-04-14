@@ -47,9 +47,18 @@ export function StoryPage() {
         setSavedTitle(detail.title || undefined);
 
         const nextSections: StorySection[] = [];
+        let textAccumulator = '';
+
+        const flushText = () => {
+          const trimmed = textAccumulator.trim();
+          if (trimmed) nextSections.push({ type: 'text', content: trimmed });
+          textAccumulator = '';
+        };
+
         for (const interaction of detail.interactions as Interaction[]) {
-          if (interaction.text?.trim()) {
-            nextSections.push({ type: 'text', content: interaction.text });
+          if (interaction.role === 'elora' && interaction.text) {
+            textAccumulator += interaction.text;
+            continue;
           }
           if (interaction.role !== 'tool') continue;
 
@@ -57,19 +66,25 @@ export function StoryPage() {
           const imgArgs = args as unknown as ImageToolResult;
           const musArgs = args as unknown as MusicToolResult;
 
-          // generate_image stores: { image_url: "...", caption: "..." }
           const imageUrl = imgArgs.image_url ?? imgArgs.url ?? null;
-          // generate_music stores: { audio_url: "...", duration_seconds: 33 }
           const musicUrl = musArgs.audio_url ?? musArgs.url ?? null;
 
-          if ((interaction.name === 'generate_image' || interaction.name === 'inline_image') && imageUrl) {
+          if (
+            (
+              interaction.name === 'generate_image'
+              || interaction.name === 'inline_image'
+              || interaction.name === 'generated_image'
+            )
+            && imageUrl
+          ) {
+            flushText();
             nextSections.push({
               type: 'image',
               url: resolveAssetUrl(imageUrl),
               caption: typeof imgArgs.caption === 'string' ? imgArgs.caption : '',
             });
-          }
-          if (interaction.name === 'generate_music' && musicUrl) {
+          } else if (interaction.name === 'generate_music' && musicUrl) {
+            flushText();
             nextSections.push({
               type: 'music',
               url: resolveAssetUrl(musicUrl),
@@ -78,6 +93,7 @@ export function StoryPage() {
           }
         }
 
+        flushText();
         setHydratedSections(nextSections);
       } catch (err) {
         console.error('[StoryPage] failed to load session:', err);

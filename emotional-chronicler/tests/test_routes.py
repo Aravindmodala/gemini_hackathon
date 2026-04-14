@@ -8,6 +8,8 @@ Tests cover:
 """
 
 import json
+import uuid
+from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from httpx import AsyncClient, ASGITransport
@@ -51,25 +53,6 @@ def _make_text_event(text: str) -> MagicMock:
     return event
 
 
-def _make_image_event(image_url: str, caption: str) -> MagicMock:
-    """Create a mock ADK event with a function_response for generate_image."""
-    fn_resp = MagicMock()
-    fn_resp.name = "generate_image"
-    fn_resp.response = {"image_url": image_url, "caption": caption}
-
-    part = MagicMock(spec=[])
-    part.text = None
-    part.thought = False
-    part.function_response = fn_resp
-    part.inline_data = None
-
-    event = MagicMock()
-    event.content = MagicMock()
-    event.content.parts = [part]
-    return event
-
-
-
 def _make_empty_event() -> MagicMock:
     """Create a mock ADK event with no content."""
     event = MagicMock(spec=[])
@@ -77,24 +60,13 @@ def _make_empty_event() -> MagicMock:
     return event
 
 
-def _make_inline_image_event(image_bytes: bytes = b"\x89PNG\r\n\x1a\n", mime_type: str = "image/png") -> MagicMock:
-    """Create a mock ADK event with native inline_data (Gemini 3 Pro Image Preview)."""
-    inline_data = MagicMock()
-    inline_data.data = image_bytes
-    inline_data.mime_type = mime_type
-
-    part = MagicMock()
-    part.text = None
-    part.thought = False
-    part.function_response = None
-    part.inline_data = inline_data
-    # Make hasattr(part, 'inline_data') return True
-    type(part).inline_data = inline_data
-
-    event = MagicMock()
-    event.content = MagicMock()
-    event.content.parts = [part]
-    return event
+@pytest.fixture
+def tmp_path():
+    base = Path(__file__).resolve().parents[1] / ".tmp_pytest" / "routes"
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / uuid.uuid4().hex
+    path.mkdir()
+    return path
 
 
 # ── format_sse_event helper ───────────────────────────────────────────────────
@@ -169,14 +141,22 @@ class TestGenerateStory:
         assert text_events[1]["chunk"] == " in a land far away"
 
     @pytest.mark.asyncio
-    async def test_story_streams_inline_image_event(self, client, tmp_path):
-        """Native inline image from Gemini 3 Pro → image SSE event with GCS fallback."""
+    async def test_story_streams_image_event_from_image_prompt_marker(self, client):
+        """IMAGE_PROMPT marker text triggers visual engine and image SSE event."""
         async def mock_run_async(**kwargs):
-            yield _make_inline_image_event()
+            yield _make_text_event("Opening prose. [[IMAGE_PROMPT: neon skyline, wide shot]] Closing prose.")
 
+        async def _to_thread_passthrough(func, *args, **kwargs):
+            if getattr(func, "__name__", "") == "write_bytes":
+                return len(args[0]) if args else 0
+            return func(*args, **kwargs)
+
+        image_cache_dir = Path(__file__).resolve().parents[1]
         with patch("app.server.routes.runner") as mock_runner, \
-             patch("app.server.routes.IMAGE_CACHE_DIR", tmp_path), \
-             patch("app.server.routes.upload_to_gcs", side_effect=Exception("GCS unavailable")):
+             patch("app.server.routes.asyncio.to_thread", side_effect=_to_thread_passthrough), \
+             patch("app.server.routes.IMAGE_CACHE_DIR", image_cache_dir), \
+             patch("app.server.routes.upload_to_gcs", side_effect=Exception("GCS unavailable")), \
+             patch("app.server.routes.generate_image", new=AsyncMock(return_value=(b"\x89PNG\r\n\x1a\n", "image/png"))) as mock_generate_image:
             mock_runner.session_service.get_session = AsyncMock(return_value=None)
             mock_runner.session_service.create_session = AsyncMock()
             mock_runner.run_async = mock_run_async
@@ -187,10 +167,92 @@ class TestGenerateStory:
             )
 
         events = await self._sse_lines(response)
+        text_events = [e for e in events if e.get("type") == "text"]
         image_events = [e for e in events if e.get("type") == "image"]
+
+        assert len(text_events) == 1
+        assert "[[IMAGE_PROMPT:" not in text_events[0]["chunk"]
         assert len(image_events) == 1
         assert "/api/v1/assets/images/" in image_events[0]["url"]
         assert image_events[0]["url"].endswith(".png")
+        mock_generate_image.assert_awaited_once_with("neon skyline, wide shot")
+
+    @pytest.mark.asyncio
+    async def test_story_handles_image_prompt_marker_split_across_chunks(self, client):
+        """IMAGE_PROMPT marker can span chunks and is processed once complete."""
+        async def mock_run_async(**kwargs):
+            yield _make_text_event("First beat. [[IMAGE_PROMPT: low angle hero portrait")
+            yield _make_text_event(", rain-soaked alley, cinematic lighting]] Second beat.")
+
+        async def _to_thread_passthrough(func, *args, **kwargs):
+            if getattr(func, "__name__", "") == "write_bytes":
+                return len(args[0]) if args else 0
+            return func(*args, **kwargs)
+
+        image_cache_dir = Path(__file__).resolve().parents[1]
+        with patch("app.server.routes.runner") as mock_runner, \
+             patch("app.server.routes.asyncio.to_thread", side_effect=_to_thread_passthrough), \
+             patch("app.server.routes.IMAGE_CACHE_DIR", image_cache_dir), \
+             patch("app.server.routes.upload_to_gcs", side_effect=Exception("GCS unavailable")), \
+             patch("app.server.routes.generate_image", new=AsyncMock(return_value=(b"\x89PNG\r\n\x1a\n", "image/png"))) as mock_generate_image:
+            mock_runner.session_service.get_session = AsyncMock(return_value=None)
+            mock_runner.session_service.create_session = AsyncMock()
+            mock_runner.run_async = mock_run_async
+
+            response = await client.post(
+                "/api/v1/stories",
+                json={"prompt": "A story with split markers"},
+            )
+
+        events = await self._sse_lines(response)
+        text_events = [e for e in events if e.get("type") == "text"]
+        image_events = [e for e in events if e.get("type") == "image"]
+
+        assert len(text_events) == 1
+        assert text_events[0]["chunk"] == "First beat.  Second beat."
+        assert len(image_events) == 1
+        mock_generate_image.assert_awaited_once_with(
+            "low angle hero portrait, rain-soaked alley, cinematic lighting"
+        )
+
+    @pytest.mark.asyncio
+    async def test_story_streams_multiple_image_prompts_from_single_chunk(self, client, tmp_path):
+        """Multiple [[IMAGE_PROMPT: ...]] markers in one chunk emit separate image events."""
+        async def mock_run_async(**kwargs):
+            yield _make_text_event(
+                "Opening line [[IMAGE_PROMPT: aurora glow]] middle [[IMAGE_PROMPT: neon dusk]] closing line"
+            )
+
+        async def _to_thread_passthrough(func, *args, **kwargs):
+            if getattr(func, "__name__", "") == "write_bytes":
+                return len(args[0]) if args else 0
+            return func(*args, **kwargs)
+
+        with patch("app.server.routes.runner") as mock_runner, \
+             patch("app.server.routes.asyncio.to_thread", side_effect=_to_thread_passthrough), \
+             patch("app.server.routes.IMAGE_CACHE_DIR", tmp_path), \
+             patch("app.server.routes.upload_to_gcs", side_effect=Exception("GCS unavailable")), \
+             patch("app.server.routes.generate_image", new=AsyncMock(return_value=(b"img-bytes", "image/png"))) as mock_generate_image:
+            mock_runner.session_service.get_session = AsyncMock(return_value=None)
+            mock_runner.session_service.create_session = AsyncMock()
+            mock_runner.run_async = mock_run_async
+
+            response = await client.post(
+                "/api/v1/stories",
+                json={"prompt": "A story with double markers"},
+            )
+
+        events = await self._sse_lines(response)
+        text_events = [e for e in events if e.get("type") == "text"]
+        image_events = [e for e in events if e.get("type") == "image"]
+
+        assert len(text_events) == 1
+        assert text_events[0]["chunk"] == "Opening line  middle  closing line"
+        assert len(image_events) == 2
+        assert [call_args.args[0] for call_args in mock_generate_image.await_args_list] == [
+            "aurora glow",
+            "neon dusk",
+        ]
 
 
     @pytest.mark.asyncio
@@ -662,7 +724,7 @@ class TestServeImage:
 class TestServeAssetImage:
     @pytest.mark.asyncio
     async def test_asset_image_serves_local_cache_first(self, client, tmp_path):
-        """Local cache hit → serve directly without signed URL."""
+        """Local cache hit -> serve directly without signed URL."""
         filename = "abcdef01234567890abcdef012345678.png"
         img_file = tmp_path / filename
         img_file.write_bytes(b"\x89PNG\r\n\x1a\n")
@@ -679,7 +741,7 @@ class TestServeAssetImage:
 
     @pytest.mark.asyncio
     async def test_asset_image_redirects_to_signed_url(self, client, tmp_path):
-        """No local cache → 302 redirect to signed GCS URL."""
+        """No local cache -> 302 redirect to signed GCS URL."""
         session_id = "abcdef01234567890abcdef012345678"
         filename = "abcdef01234567890abcdef012345678.png"
         signed = "https://storage.googleapis.com/signed-url-here"
@@ -695,30 +757,104 @@ class TestServeAssetImage:
         assert response.headers["location"] == signed
 
     @pytest.mark.asyncio
+    async def test_asset_image_falls_back_to_direct_gcs_when_signing_fails(self, client, tmp_path):
+        """Signed URL failure falls back to direct GCS download when blob exists."""
+        session_id = "abcdef01234567890abcdef012345678"
+        filename = "abcdef01234567890abcdef012345678.png"
+        blob_path = f"images/{session_id}/{filename}"
+
+        mock_blob = MagicMock()
+        mock_blob.exists.return_value = True
+        mock_blob.download_as_bytes.return_value = b"direct-gcs-bytes"
+        mock_blob.content_type = "image/png"
+
+        mock_bucket = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+
+        with patch("app.server.routes.IMAGE_CACHE_DIR", tmp_path), \
+             patch("app.server.routes.generate_signed_url", side_effect=Exception("GCS error")), \
+             patch("app.server.routes.get_gcs_bucket", return_value=mock_bucket):
+            response = await client.get(
+                f"/api/v1/assets/images/{session_id}/{filename}",
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 200
+        assert response.content == b"direct-gcs-bytes"
+        assert "image/png" in response.headers["content-type"]
+        mock_bucket.blob.assert_called_once_with(blob_path)
+        mock_blob.exists.assert_called_once()
+        mock_blob.download_as_bytes.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_asset_image_rejects_invalid_session_id(self, client):
-        """Non-hex session_id → 400."""
+        """Non-hex session_id -> 400."""
         session_id = "not-a-valid-hex-id!!"
         response = await client.get(f"/api/v1/assets/images/{session_id}/abcdef01234567890abcdef012345678.png")
         assert response.status_code == 400
 
     @pytest.mark.asyncio
     async def test_asset_image_rejects_invalid_filename(self, client):
-        """Invalid filename format → 400."""
+        """Invalid filename format -> 400."""
         session_id = "abcdef01234567890abcdef012345678"
         response = await client.get(f"/api/v1/assets/images/{session_id}/not-valid-filename.exe")
         assert response.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_asset_image_returns_404_on_signed_url_failure(self, client, tmp_path):
-        """GCS signed URL generation failure → 404."""
+    async def test_asset_image_returns_404_when_blob_missing_and_no_prompt(self, client, tmp_path):
+        """Missing blob with no prompt metadata returns 404."""
         session_id = "abcdef01234567890abcdef012345678"
         filename = "abcdef01234567890abcdef012345678.png"
 
+        mock_blob = MagicMock()
+        mock_blob.exists.return_value = False
+        mock_bucket = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+
         with patch("app.server.routes.IMAGE_CACHE_DIR", tmp_path), \
-             patch("app.server.routes.generate_signed_url", side_effect=Exception("GCS error")):
+             patch("app.server.routes.generate_signed_url", side_effect=Exception("no signer")), \
+             patch("app.server.routes.get_gcs_bucket", return_value=mock_bucket), \
+             patch(
+                 "app.server.routes.SessionQueryService.find_image_interaction_for_asset",
+                 return_value={"user_id": "owner-1", "image_prompt": None},
+                 create=True,
+             ), \
+             patch("app.server.routes.generate_image", new=AsyncMock()) as mock_generate:
             response = await client.get(
                 f"/api/v1/assets/images/{session_id}/{filename}",
                 follow_redirects=False,
             )
 
         assert response.status_code == 404
+        mock_generate.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_asset_image_returns_404_when_blob_missing_even_with_prompt(self, client, tmp_path):
+        """Existing-session policy: missing blob returns 404 (no regeneration on fetch)."""
+        session_id = "abcdef01234567890abcdef012345678"
+        filename = "abcdef01234567890abcdef012345678.png"
+
+        mock_blob = MagicMock()
+        mock_blob.exists.return_value = False
+        mock_bucket = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+
+        with patch("app.server.routes.IMAGE_CACHE_DIR", tmp_path), \
+             patch("app.server.routes.generate_signed_url", side_effect=Exception("no signer")), \
+             patch("app.server.routes.get_gcs_bucket", return_value=mock_bucket), \
+             patch(
+                 "app.server.routes.SessionQueryService.find_image_interaction_for_asset",
+                 return_value={"user_id": "owner-1", "image_prompt": "moonlit forest"},
+                 create=True,
+             ), \
+             patch(
+                 "app.server.routes.generate_image",
+                 new=AsyncMock(return_value=(b"\x89PNG\r\n\x1a\n", "image/png")),
+             ) as mock_generate:
+            response = await client.get(
+                f"/api/v1/assets/images/{session_id}/{filename}",
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 404
+        mock_generate.assert_not_awaited()

@@ -15,9 +15,8 @@ import logging
 from google.adk.agents import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.genai import types as genai_types
 
-from app.config import STORY_MODEL, COMPANION_MODEL
+from app.config import NARRATIVE_MODEL, COMPANION_MODEL
 from app.prompts import ELORA_SYSTEM_PROMPT
 from app.prompts.companion import COMPANION_SYSTEM_PROMPT
 
@@ -25,20 +24,17 @@ logger = logging.getLogger("chronicler")
 
 APP_NAME = "emotional_chronicler"
 
-# ── Story agent (Gemini 3 Pro Image Preview — native text + image output) ─────
+# ── Story agent (text-only narrative engine — image prompts parsed by route) ──
 
 elora_agent = Agent(
     name="elora",
-    model=STORY_MODEL,
+    model=NARRATIVE_MODEL,
     description=(
         "Elora — a master author and storyteller who writes richly illustrated stories. "
-        "She generates literary prose narration with native inline image generation."
+        "She generates literary prose with embedded image prompt markers for a separate visual engine."
     ),
     instruction=ELORA_SYSTEM_PROMPT,
     tools=[],
-    generate_content_config=genai_types.GenerateContentConfig(
-        response_modalities=["TEXT", "IMAGE"],
-    ),
 )
 
 # ── Session service (shared by both agents) ───────────────────────────────────
@@ -73,5 +69,5 @@ companion_runner = Runner(
     session_service=_session_service,
 )
 
-logger.info("[Agent] Elora story agent ready — model: %s", STORY_MODEL)
+logger.info("[Agent] Elora story agent ready — model: %s", NARRATIVE_MODEL)
 logger.info("[Agent] Elora companion ready — model: %s", COMPANION_MODEL)

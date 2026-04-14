@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
+import { Pencil, Trash2 } from 'lucide-react';
 import type { Session } from '../../types/session';
 import { SIDEBAR_WIDTH } from '../../config/layout';
 
@@ -79,6 +80,129 @@ interface SessionSidebarProps {
   userPhoto: string | null;
   isOpen: boolean;
   onToggle: () => void;
+}
+
+/* ── Icons (lucide-react) ────────────────────────────── */
+
+function EditIcon() {
+  return <Pencil size={13} strokeWidth={1.75} />;
+}
+
+function DeleteIcon() {
+  return <Trash2 size={13} strokeWidth={1.75} />;
+}
+
+/* ── ActionButton ─────────────────────────────────────── */
+
+type ActionBtnVariant = 'edit' | 'delete';
+
+function ActionButton({
+  variant,
+  title,
+  onClick,
+  children,
+}: {
+  variant: ActionBtnVariant;
+  title: string;
+  onClick: (e: React.MouseEvent) => void;
+  children: React.ReactNode;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const isDelete = variant === 'delete';
+
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '2px',
+        color: hovered
+          ? isDelete ? '#f87171' : '#a78bfa'
+          : '#475569',
+        transition: 'color 0.15s ease, transform 0.15s ease',
+        transform: hovered ? 'scale(1.2)' : 'scale(1)',
+        flexShrink: 0,
+        fontFamily: 'inherit',
+        lineHeight: 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/* ── SessionThumbnail ────────────────────────────────── */
+
+function SessionThumbnail({
+  url,
+  isHovered,
+  isActive,
+}: {
+  url?: string | null;
+  isHovered?: boolean;
+  isActive?: boolean;
+}) {
+  const thumbBase: CSSProperties = {
+    width: 44,
+    height: 50,
+    borderRadius: 8,
+    flexShrink: 0,
+    transition: 'filter 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease',
+  };
+
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt="Story cover"
+        style={{
+          ...thumbBase,
+          objectFit: 'cover',
+          display: 'block',
+          filter: isHovered
+            ? 'brightness(0.9) saturate(1.15) contrast(1.05)'
+            : 'brightness(0.78) saturate(1.08) contrast(1.05)',
+          transform: isHovered ? 'scale(1.05)' : 'scale(1)',
+          boxShadow: isActive
+            ? '0 0 0 2px #7c3aed, 0 4px 12px rgba(124,58,237,0.35)'
+            : '0 2px 8px rgba(0,0,0,0.4)',
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      style={{
+        ...thumbBase,
+        background:
+          'radial-gradient(circle at 35% 65%, rgba(124,58,237,0.35) 0%, transparent 65%),' +
+          'linear-gradient(145deg, #2d1257 0%, #180a38 55%, #0d0820 100%)',
+        border: isActive
+          ? '1px solid rgba(124,58,237,0.6)'
+          : '1px solid rgba(124,58,237,0.22)',
+        boxShadow: isActive
+          ? '0 0 0 1px #7c3aed, 0 4px 12px rgba(124,58,237,0.3)'
+          : '0 2px 8px rgba(0,0,0,0.35)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: isHovered ? 'rgba(167,139,250,0.6)' : 'rgba(124,58,237,0.4)',
+        fontSize: 15,
+        transform: isHovered ? 'scale(1.05)' : 'scale(1)',
+      }}
+    >
+      ✦
+    </div>
+  );
 }
 
 /* ── component ───────────────────────────────────── */
@@ -194,8 +318,11 @@ export function SessionSidebar({
             <div style={styles.emptyText}>No stories yet. Start your first adventure!</div>
           ) : (
             groups.map(group => (
-              <div key={group.label}>
-                <div style={styles.groupLabel}>{group.label}</div>
+                <div key={group.label}>
+                  <div style={styles.groupLabel}>{group.label}</div>
+                  {group.label === 'Today' && (
+                    <div style={styles.subGroupLabel}>Recent Stories</div>
+                  )}
                 {group.sessions.map(session => {
                   const isActive = session.session_id === activeSessionId;
                   const isHovered = session.session_id === hoveredId;
@@ -256,41 +383,46 @@ export function SessionSidebar({
                         /* Normal session display */
                         <>
                           <div style={styles.sessionContent}>
-                            <div style={styles.sessionIcon}>📖</div>
+                            <SessionThumbnail
+                              url={session.thumbnail_url}
+                              isHovered={isHovered}
+                              isActive={isActive}
+                            />
                             <div style={styles.sessionInfo}>
-                              <div style={styles.sessionTitle}>
-                                {truncate(session.title || 'Untitled Story', 30)}
+                              <div style={styles.sessionTitleRow}>
+                                <div style={styles.sessionTitle}>
+                                  {truncate(session.title || 'Untitled Story', 22)}
+                                </div>
+                                {isHovered ? (
+                                  <div style={styles.actionBtns}>
+                                    <ActionButton
+                                      variant="edit"
+                                      title="Rename story"
+                                      onClick={(e) => { e.stopPropagation(); handleRenameStart(session); }}
+                                    >
+                                      <EditIcon />
+                                    </ActionButton>
+                                    <ActionButton
+                                      variant="delete"
+                                      title="Delete story"
+                                      onClick={(e) => { e.stopPropagation(); setDeletingId(session.session_id); }}
+                                    >
+                                      <DeleteIcon />
+                                    </ActionButton>
+                                  </div>
+                                ) : (
+                                  <div style={styles.sessionTime}>
+                                    {relativeTime(session.updated_at ?? session.created_at)}
+                                  </div>
+                                )}
                               </div>
                               {session.preview && (
                                 <div style={styles.sessionPreview}>
-                                  {truncate(session.preview, 50)}
+                                  {truncate(session.preview, 42)}
                                 </div>
                               )}
                             </div>
-                            <div style={styles.sessionTime}>
-                              {relativeTime(session.updated_at ?? session.created_at)}
-                            </div>
                           </div>
-
-                          {/* Action buttons on hover */}
-                          {isHovered && (
-                            <div style={styles.actionBtns}>
-                              <button
-                                style={styles.actionBtn}
-                                title="Rename"
-                                onClick={(e) => { e.stopPropagation(); handleRenameStart(session); }}
-                              >
-                                ✏️
-                              </button>
-                              <button
-                                style={styles.actionBtn}
-                                title="Delete"
-                                onClick={(e) => { e.stopPropagation(); setDeletingId(session.session_id); }}
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                          )}
                         </>
                       )}
                     </div>
@@ -437,11 +569,21 @@ const styles: Record<string, CSSProperties> = {
     textTransform: 'uppercase' as const,
   },
 
+  /* Sub-group label (e.g. "Recent Stories" within Today) */
+  subGroupLabel: {
+    padding: '4px 16px 6px',
+    fontSize: 10,
+    fontWeight: 500,
+    color: '#475569',
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase' as const,
+  },
+
   /* Session item */
   sessionItem: {
     position: 'relative',
-    padding: '10px 12px',
-    margin: '1px 6px',
+    padding: '8px 10px',
+    margin: '2px 6px',
     borderRadius: 8,
     cursor: 'pointer',
     transition: 'all 200ms ease',
@@ -461,17 +603,18 @@ const styles: Record<string, CSSProperties> = {
   /* Session content row */
   sessionContent: {
     display: 'flex',
-    alignItems: 'flex-start',
-    gap: 8,
+    alignItems: 'center',
+    gap: 10,
     minWidth: 0,
-  },
-  sessionIcon: {
-    fontSize: 14,
-    flexShrink: 0,
-    marginTop: 2,
   },
   sessionInfo: {
     flex: 1,
+    minWidth: 0,
+  },
+  sessionTitleRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 6,
     minWidth: 0,
   },
   sessionTitle: {
@@ -481,11 +624,13 @@ const styles: Record<string, CSSProperties> = {
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+    flex: 1,
+    minWidth: 0,
   },
   sessionPreview: {
     fontSize: 11,
     color: '#64748b',
-    marginTop: 2,
+    marginTop: 3,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -494,30 +639,15 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 10,
     color: '#475569',
     flexShrink: 0,
-    marginTop: 2,
     whiteSpace: 'nowrap',
   },
 
-  /* Hover action buttons */
+  /* Inline action buttons (replace timestamp on hover) */
   actionBtns: {
     display: 'flex',
     gap: 2,
-    position: 'absolute',
-    right: 8,
-    top: 8,
-    background: 'rgba(15, 10, 26, 0.9)',
-    borderRadius: 6,
-    padding: '2px 4px',
-  },
-  actionBtn: {
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: 13,
-    padding: '2px 4px',
-    borderRadius: 4,
-    transition: 'background 0.15s ease',
-    lineHeight: 1,
+    alignItems: 'center',
+    flexShrink: 0,
   },
 
   /* Rename inline */

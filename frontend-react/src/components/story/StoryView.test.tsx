@@ -76,4 +76,28 @@ describe('StoryView story blocks', () => {
 
     expect(container.querySelectorAll('[data-testid^="story-block-paragraph"]').length).toBe(0);
   });
+
+  it('keeps inline image placement in narrative flow', () => {
+    spy.mockReturnValue([
+      {
+        type: 'paragraph',
+        chunks: [{ text: 'Opening beat.' }],
+      },
+    ]);
+
+    render(
+      <StoryView
+        sections={[
+          { type: 'text', content: 'chunk' },
+          { type: 'image', url: '/api/images/inline.png', caption: 'Inline visual' },
+        ]}
+        status="done"
+        currentMusic={null}
+      />,
+    );
+
+    const paragraph = screen.getByText('Opening beat.');
+    const image = screen.getByAltText('Inline visual');
+    expect(paragraph.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

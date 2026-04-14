@@ -69,13 +69,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await firebaseSignOut(auth);
   }, []);
 
-  const getIdToken = useCallback(async (): Promise<string> => {
+  const getIdToken = useCallback(async (forceRefresh = false): Promise<string> => {
     const currentUser = auth.currentUser;
     if (!currentUser) throw new Error('No authenticated user');
     // Let Firebase SDK handle token refresh automatically (refreshes when
     // within 5 min of expiry). Passing `true` would force a network
     // round-trip on every call, adding 100-300ms unnecessary latency.
-    return currentUser.getIdToken();
+    return currentUser.getIdToken(forceRefresh);
   }, []);
 
   /* ── render ────────────────────────────────────── */

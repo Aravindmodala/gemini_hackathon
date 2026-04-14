@@ -2,17 +2,16 @@
 HTTP route handlers.
 
 Routers:
-  router     â€” static assets and SPA (no version prefix needed)
-  api_router â€” versioned story generation API (mounted at /api/v1 by factory)
+  router     Ã¢â‚¬" static assets and SPA (no version prefix needed)
+  api_router Ã¢â‚¬" versioned story generation API (mounted at /api/v1 by factory)
 
 Routes:
-  GET  /                        â€” serve frontend SPA
-  GET  /api/images/{filename}   â€” serve generated images (inline from Gemini)
-  POST /api/v1/stories          â€” ADK agent: stream illustrated story (SSE)
+  GET  /                        Ã¢â‚¬" serve frontend SPA
+  GET  /api/images/{filename}   Ã¢â‚¬" serve generated images (inline from Gemini)
+  POST /api/v1/stories          Ã¢â‚¬" ADK agent: stream illustrated story (SSE)
 """
 
 import asyncio
-import base64
 import logging
 import mimetypes
 import uuid
@@ -20,13 +19,21 @@ import uuid
 import re
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from google.genai import types as genai_types
 from pydantic import BaseModel, field_validator
 
-from app.config import FRONTEND_DIR, IMAGE_CACHE_DIR, upload_to_gcs, generate_signed_url
+from app.config import (
+    FRONTEND_DIR,
+    IMAGE_CACHE_DIR,
+    generate_signed_url,
+    get_gcs_bucket,
+    upload_to_gcs,
+)
 from app.core.adk_session_manager import ADKSessionManager
 from app.core.agent import runner, APP_NAME
+from app.core.visual_engine import generate_image
+from app.server.prompt_parser import extract_and_strip_prompts, has_partial_marker
 from app.core.session_query_service import SessionQueryService
 from app.core.store import SessionStore
 from app.server.auth_middleware import get_optional_user
@@ -35,8 +42,8 @@ from app.server.sse import format_sse_event
 
 logger = logging.getLogger("chronicler")
 
-# â”€â”€ Two routers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# router:     static assets + SPA (no prefix â€” registered directly in factory)
+# Ã¢"â‚¬Ã¢"â‚¬ Two routers Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬
+# router:     static assets + SPA (no prefix Ã¢â‚¬" registered directly in factory)
 # api_router: versioned story API (factory mounts under /api/v1)
 
 # Flush Elora text to Firestore every ~800 characters to survive interruptions
@@ -63,38 +70,6 @@ _MAX_TITLE_BUFFER_CHARS = 1200
 router = APIRouter()
 api_router = APIRouter()
 
-
-def _coerce_image_bytes(raw: bytes | str | None) -> bytes | None:
-    """Normalize image payloads to raw bytes."""
-    if raw is None:
-        return None
-    if isinstance(raw, bytes):
-        return raw
-    if isinstance(raw, str):
-        try:
-            return base64.b64decode(raw)
-        except Exception:
-            logger.warning("[Image] Failed to decode base64 inline image payload")
-            return None
-    logger.warning("[Image] Unsupported inline image payload type: %s", type(raw).__name__)
-    return None
-
-
-def _extract_inline_image(part: genai_types.Part) -> tuple[bytes, str] | None:
-    """Extract image bytes + mime from an event part when available."""
-    inline_data = getattr(part, "inline_data", None)
-    if not inline_data:
-        return None
-
-    mime = (getattr(inline_data, "mime_type", None) or "").lower()
-    if not mime.startswith("image/"):
-        return None
-
-    image_bytes = _coerce_image_bytes(getattr(inline_data, "data", None))
-    if not image_bytes:
-        return None
-
-    return image_bytes, mime
 
 
 def _sanitize_title(raw_title: str) -> str:
@@ -177,7 +152,7 @@ async def _persist_and_emit_title(
     return format_sse_event({"type": "title", "title": resolved_title, "brief": brief})
 
 
-# â”€â”€ Frontend SPA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Ã¢"â‚¬Ã¢"â‚¬ Frontend SPA Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬
 
 @router.get("/")
 async def serve_index():
@@ -185,7 +160,7 @@ async def serve_index():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
-# â”€â”€ Request model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Ã¢"â‚¬Ã¢"â‚¬ Request model Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬
 
 class StoryRequest(BaseModel):
     prompt: str
@@ -204,7 +179,7 @@ class StoryRequest(BaseModel):
         return v
 
 
-# â”€â”€ Illustrated story generation (ADK + Gemini 3 Pro Image Preview) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Ã¢"â‚¬Ã¢"â‚¬ Illustrated story generation (ADK + Gemini 3 Pro Image Preview) Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬
 
 @api_router.post(
     "/stories",
@@ -222,12 +197,12 @@ async def generate_story(request: StoryRequest, http_request: Request):
     Stream an illustrated story from the Elora ADK agent.
 
     Returns a Server-Sent Events stream. Each event is a JSON object with a `type`:
-      {"type": "session", "session_id": "..."}    â€” resolved session id
-      {"type": "text",  "chunk": "..."}          â€” prose narrative chunk
+      {"type": "session", "session_id": "..."}    Ã¢â‚¬" resolved session id
+      {"type": "text",  "chunk": "..."}          Ã¢â‚¬" prose narrative chunk
       {"type": "image", "url": "/api/images/...", "caption": "..."}
       {"type": "music", "url": "/api/music/..."}
-      {"type": "done"}                            â€” stream complete
-      {"type": "error", "message": "..."}         â€” generation error (generic message)
+      {"type": "done"}                            Ã¢â‚¬" stream complete
+      {"type": "error", "message": "..."}         Ã¢â‚¬" generation error (generic message)
     """
     logger.info(
         "[Story] request_received has_auth=%s requested_user_id=%s requested_session_id=%s",
@@ -267,6 +242,8 @@ async def generate_story(request: StoryRequest, http_request: Request):
         text_chunks_seen: int = 0
         images_emitted: int = 0
         thought_parts_skipped: int = 0
+        prompt_buffer: str = ""
+        image_prompts_processed: int = 0
         companion_context_applied: bool = False
         try:
             logger.info(
@@ -331,7 +308,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                 parts=[genai_types.Part(text=prompt_text)],
             )
 
-            # â”€â”€ Heartbeat + event queue pattern â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # Ã¢"â‚¬Ã¢"â‚¬ Heartbeat + event queue pattern Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬
             # runner.run_async with stream=False can block for 60+ seconds.
             # We collect events into an asyncio.Queue from a background task
             # and emit SSE keep-alive pings while waiting.
@@ -358,7 +335,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                         event_queue.get(), timeout=HEARTBEAT_INTERVAL_SECONDS
                     )
                 except asyncio.TimeoutError:
-                    # No event yet â€” send a keep-alive ping
+                    # No event yet Ã¢â‚¬" send a keep-alive ping
                     yield format_sse_event({"type": "thinking"})
                     continue
 
@@ -387,7 +364,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
                         )
                         title_emitted = True
 
-                    # â”€â”€ Text chunk â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                    # Ã¢"â‚¬Ã¢"â‚¬ Text chunk (with image prompt marker extraction) Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬
                     text_value = getattr(part, "text", None)
                     if text_value:
                         visible_text = text_value
@@ -419,62 +396,84 @@ async def generate_story(request: StoryRequest, http_request: Request):
                                 title_emitted = True
 
                         if visible_text:
-                            text_chunks_seen += 1
-                            yield format_sse_event({"type": "text", "chunk": visible_text})
-                            elora_text_buffer.append(visible_text)
-                            elora_buffered_chars += len(visible_text)
+                            # Accumulate in prompt buffer for marker detection
+                            prompt_buffer += visible_text
+
+                            # Check for partial marker at end â€" keep buffering if so
+                            if has_partial_marker(prompt_buffer):
+                                continue
+
+                            # Extract complete image prompt markers
+                            cleaned_text, image_prompts = extract_and_strip_prompts(prompt_buffer)
+                            prompt_buffer = ""
+
+                            # Emit cleaned text
+                            if cleaned_text.strip():
+                                text_chunks_seen += 1
+                                yield format_sse_event({"type": "text", "chunk": cleaned_text})
+                                elora_text_buffer.append(cleaned_text)
+                                elora_buffered_chars += len(cleaned_text)
+
+                            # Generate images for each extracted image prompt marker
+                            for ip in image_prompts:
+                                image_prompts_processed += 1
+                                logger.info("[Visual] Generating image %d: %.80s...", image_prompts_processed, ip)
+
+                                result = await generate_image(ip)
+                                if result is None:
+                                    logger.warning("[Visual] Image generation failed, skipping")
+                                    continue
+
+                                image_bytes, mime = result
+                                if len(image_bytes) > MAX_IMAGE_BYTES:
+                                    logger.warning("[Image] Oversized image skipped (%d bytes)", len(image_bytes))
+                                    continue
+
+                                # Save + emit
+                                ext = _IMAGE_EXT_MAP.get(mime, ".bin")
+                                filename = f"{uuid.uuid4().hex}{ext}"
+                                filepath = IMAGE_CACHE_DIR / filename
+                                await asyncio.to_thread(filepath.write_bytes, image_bytes)
+
+                                blob_path = f"images/{session_id}/{filename}"
+                                image_url = f"/api/v1/assets/images/{session_id}/{filename}"
+                                gcs_upload_ok = True
+                                try:
+                                    await asyncio.to_thread(upload_to_gcs, blob_path, image_bytes, mime)
+                                except Exception as gcs_err:
+                                    gcs_upload_ok = False
+                                    logger.warning(
+                                        "[Image] GCS upload failed session_id=%s filename=%s error=%s",
+                                        session_id, filename, gcs_err,
+                                    )
+
+                                yield format_sse_event({"type": "image", "url": image_url, "caption": ""})
+                                images_emitted += 1
+
+                                # Flush preceding prose to Firestore BEFORE the image so that
+                                # interactions are stored in correct narrative order on restore.
+                                if store and elora_text_buffer:
+                                    await asyncio.to_thread(
+                                        store.log_interaction, "elora", "".join(elora_text_buffer)
+                                    )
+                                    elora_text_buffer.clear()
+                                    elora_buffered_chars = 0
+
+                                if store:
+                                    await asyncio.to_thread(store.log_tool_call, "generated_image", {
+                                        "image_url": image_url,
+                                        "blob_path": blob_path,
+                                        "image_prompt": ip[:500],
+                                        "gcs_ok": gcs_upload_ok,
+                                    })
+
                         # Flush to Firestore periodically so content survives interruptions
                         if store and elora_buffered_chars >= ELORA_FLUSH_CHARS:
                             await asyncio.to_thread(store.log_interaction, "elora", "".join(elora_text_buffer))
                             elora_text_buffer.clear()
                             elora_buffered_chars = 0
 
-                    # â”€â”€ Inline image (native Gemini 3 Pro Image Preview output) â”€â”€
-                    extracted = _extract_inline_image(part)
-                    if extracted:
-                        image_bytes, mime = extracted
-
-                        # Size guard â€” skip oversized images
-                        if len(image_bytes) > MAX_IMAGE_BYTES:
-                            logger.warning("[Image] Oversized inline image skipped (%d bytes)", len(image_bytes))
-                            continue
-
-                        # Derive extension and content type from the model's MIME type
-                        ext = _IMAGE_EXT_MAP.get(mime, ".bin")
-                        filename = f"{uuid.uuid4().hex}{ext}"
-
-                        # Save to local cache
-                        filepath = IMAGE_CACHE_DIR / filename
-                        await asyncio.to_thread(filepath.write_bytes, image_bytes)
-                        logger.info(
-                            "[Image] Generated inline image: %s (%d bytes, %s) session_id=%s",
-                            filename, len(image_bytes), mime, session_id,
-                        )
-
-                        # Upload to GCS for persistent storage (organized by session)
-                        blob_path = f"images/{session_id}/{filename}"
-                        image_url = f"/api/v1/assets/images/{session_id}/{filename}"
-                        try:
-                            await asyncio.to_thread(
-                                upload_to_gcs, blob_path, image_bytes, mime
-                            )
-                            logger.info("[Image] Uploaded to GCS: %s", blob_path)
-                        except Exception as gcs_err:
-                            logger.warning("[Image] GCS upload failed, will serve locally: %s", gcs_err)
-
-                        yield format_sse_event({
-                            "type": "image",
-                            "url": image_url,
-                            "caption": "",
-                        })
-                        images_emitted += 1
-                        if store:
-                            await asyncio.to_thread(store.log_tool_call, "inline_image", {
-                                "image_url": image_url,
-                                "blob_path": blob_path,
-                            })
-
-                    # â”€â”€ Tool response (music, or legacy image) â”€â”€â”€â”€â”€â”€â”€â”€
+                    # Ã¢"â‚¬Ã¢"â‚¬ Tool response (music, or legacy image) Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬
                     if part.function_response:
                         result = part.function_response.response or {}
                         fn_name = part.function_response.name
@@ -492,6 +491,18 @@ async def generate_story(request: StoryRequest, http_request: Request):
             # Ensure collector is done (it should be, since _SENTINEL was received)
             if not collector.done():
                 collector.cancel()
+
+            # Flush any trailing prose that remained buffered for marker-span detection.
+            if prompt_buffer:
+                if has_partial_marker(prompt_buffer):
+                    marker_start = prompt_buffer.rfind("[[IMAGE_PROMPT:")
+                    prompt_buffer = prompt_buffer[:marker_start] if marker_start > 0 else ""
+                cleaned_tail, _ = extract_and_strip_prompts(prompt_buffer)
+                if cleaned_tail.strip():
+                    text_chunks_seen += 1
+                    yield format_sse_event({"type": "text", "chunk": cleaned_tail})
+                    elora_text_buffer.append(cleaned_tail)
+                    elora_buffered_chars += len(cleaned_tail)
 
             # Flush accumulated Elora text to Firestore
             if store and elora_text_buffer:
@@ -570,7 +581,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
     )
 
 
-# â”€â”€ Static asset serving â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Ã¢"â‚¬Ã¢"â‚¬ Static asset serving Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬Ã¢"â‚¬
 
 @router.get(
     "/api/images/{filename}",
@@ -597,6 +608,125 @@ _HEX_RE = re.compile(r"^[0-9a-f]{32}$")
 _FILENAME_RE = re.compile(r"^[0-9a-f]{32}\.\w{2,4}$")
 
 
+def _log_asset_marker(
+    marker: str,
+    *,
+    session_id: str,
+    filename: str,
+    level: int = logging.INFO,
+    **fields,
+) -> None:
+    """Emit deterministic structured markers for asset retrieval/regeneration paths."""
+    sorted_items = sorted((k, v) for k, v in fields.items() if v is not None)
+    suffix = " ".join(f"{k}={v}" for k, v in sorted_items)
+    message = f"[Asset] marker={marker} session_id={session_id} filename={filename}"
+    if suffix:
+        message = f"{message} {suffix}"
+    logger.log(level, message)
+
+
+async def _regenerate_missing_asset_image(
+    *,
+    session_id: str,
+    filename: str,
+    blob_path: str,
+    local_path,
+) -> tuple[bytes, str] | None:
+    """Try to regenerate a missing image from persisted interaction metadata."""
+    resolved = await asyncio.to_thread(
+        SessionQueryService.find_image_interaction_for_asset,
+        session_id,
+        filename,
+        blob_path,
+    )
+    if not resolved:
+        _log_asset_marker(
+            "missing_blob",
+            session_id=session_id,
+            filename=filename,
+            level=logging.WARNING,
+            reason="interaction_not_found",
+        )
+        return None
+
+    user_id = resolved.get("user_id")
+    image_prompt = resolved.get("image_prompt")
+    if not image_prompt:
+        _log_asset_marker(
+            "missing_blob",
+            session_id=session_id,
+            filename=filename,
+            level=logging.WARNING,
+            reason="image_prompt_missing",
+            user_id=user_id,
+        )
+        return None
+
+    result = await generate_image(image_prompt)
+    if result is None:
+        _log_asset_marker(
+            "missing_blob",
+            session_id=session_id,
+            filename=filename,
+            level=logging.WARNING,
+            reason="regeneration_failed",
+            user_id=user_id,
+        )
+        return None
+
+    image_bytes, mime = result
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        _log_asset_marker(
+            "missing_blob",
+            session_id=session_id,
+            filename=filename,
+            level=logging.WARNING,
+            reason="regeneration_oversized",
+            bytes=len(image_bytes),
+            user_id=user_id,
+        )
+        return None
+
+    await asyncio.to_thread(local_path.write_bytes, image_bytes)
+
+    upload_ok = True
+    try:
+        await asyncio.to_thread(upload_to_gcs, blob_path, image_bytes, mime)
+    except Exception as gcs_err:
+        upload_ok = False
+        _log_asset_marker(
+            "regenerated",
+            session_id=session_id,
+            filename=filename,
+            level=logging.WARNING,
+            gcs_upload="failed",
+            error=gcs_err,
+            user_id=user_id,
+        )
+
+    metadata_updated = False
+    if user_id:
+        metadata_updated = await asyncio.to_thread(
+            SessionQueryService.mark_image_interaction_regenerated,
+            user_id=user_id,
+            session_id=session_id,
+            filename=filename,
+            blob_path=blob_path,
+            image_prompt=image_prompt,
+            mime_type=mime,
+        )
+
+    _log_asset_marker(
+        "regenerated",
+        session_id=session_id,
+        filename=filename,
+        user_id=user_id,
+        gcs_upload="ok" if upload_ok else "failed",
+        metadata_updated=metadata_updated,
+    )
+    return image_bytes, mime
+
+
 @api_router.get(
     "/assets/images/{session_id}/{filename}",
     summary="Serve a story image via signed URL redirect",
@@ -612,20 +742,115 @@ async def serve_asset_image(session_id: str, filename: str):
     """Serve a story image: local cache first, GCS signed URL redirect as fallback."""
     # Validate path parameters to prevent traversal
     if not _HEX_RE.match(session_id) or not _FILENAME_RE.match(filename):
+        _log_asset_marker(
+            "invalid_params",
+            session_id=session_id,
+            filename=filename,
+            level=logging.WARNING,
+        )
         raise HTTPException(status_code=400, detail="Invalid path parameters")
 
     # Fast path: serve from local cache if available
     local_path = (IMAGE_CACHE_DIR / filename).resolve()
-    if local_path.is_relative_to(IMAGE_CACHE_DIR.resolve()) and local_path.exists():
+    cache_root = IMAGE_CACHE_DIR.resolve()
+    if not local_path.is_relative_to(cache_root):
+        _log_asset_marker(
+            "invalid_params",
+            session_id=session_id,
+            filename=filename,
+            level=logging.WARNING,
+            reason="cache_path_escape",
+        )
+        raise HTTPException(status_code=400, detail="Invalid path parameters")
+    if local_path.exists():
         media_type, _ = mimetypes.guess_type(str(local_path))
+        _log_asset_marker("local_hit", session_id=session_id, filename=filename)
         return FileResponse(str(local_path), media_type=media_type or "application/octet-stream")
 
-    # Generate a short-lived signed URL and redirect
     blob_path = f"images/{session_id}/{filename}"
+
+    # Generate a short-lived signed URL and redirect
     try:
         signed_url = await asyncio.to_thread(generate_signed_url, blob_path)
+        try:
+            bucket = await asyncio.to_thread(get_gcs_bucket)
+            blob = bucket.blob(blob_path)
+            if await asyncio.to_thread(blob.exists):
+                _log_asset_marker("signed_redirect", session_id=session_id, filename=filename)
+                return RedirectResponse(url=signed_url, status_code=302)
+
+            if local_path.exists():
+                media_type, _ = mimetypes.guess_type(str(local_path))
+                _log_asset_marker("local_hit", session_id=session_id, filename=filename, source="signed_probe_fallback")
+                return FileResponse(str(local_path), media_type=media_type or "application/octet-stream")
+            _log_asset_marker(
+                "missing_blob",
+                session_id=session_id,
+                filename=filename,
+                level=logging.WARNING,
+                source="signed_probe",
+                reason="existing_only_policy",
+            )
+            raise HTTPException(status_code=404, detail="Image not found")
+        except HTTPException:
+            raise
+        except Exception as exists_err:
+            _log_asset_marker(
+                "signed_redirect",
+                session_id=session_id,
+                filename=filename,
+                level=logging.WARNING,
+                verify_exists="failed",
+                error=exists_err,
+            )
+            return RedirectResponse(url=signed_url, status_code=302)
     except Exception as e:
-        logger.warning("[Asset] Failed to generate signed URL for %s: %s", blob_path, e)
+        _log_asset_marker(
+            "signed_redirect",
+            session_id=session_id,
+            filename=filename,
+            level=logging.WARNING,
+            status="unavailable",
+            error=e,
+        )
+
+    # Fallback path when credentials cannot sign URLs:
+    # fetch bytes directly from GCS and serve through this API.
+    try:
+        bucket = await asyncio.to_thread(get_gcs_bucket)
+        blob = bucket.blob(blob_path)
+        exists = await asyncio.to_thread(blob.exists)
+        if not exists:
+            if local_path.exists():
+                media_type, _ = mimetypes.guess_type(str(local_path))
+                _log_asset_marker("local_hit", session_id=session_id, filename=filename, source="direct_gcs_fallback")
+                return FileResponse(str(local_path), media_type=media_type or "application/octet-stream")
+            _log_asset_marker(
+                "missing_blob",
+                session_id=session_id,
+                filename=filename,
+                level=logging.WARNING,
+                source="direct_gcs",
+                reason="existing_only_policy",
+            )
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        data = await asyncio.to_thread(blob.download_as_bytes)
+        media_type = blob.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        await asyncio.to_thread(local_path.write_bytes, data)
+        _log_asset_marker("direct_gcs", session_id=session_id, filename=filename)
+        return Response(content=data, media_type=media_type)
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log_asset_marker(
+            "direct_gcs",
+            session_id=session_id,
+            filename=filename,
+            level=logging.WARNING,
+            status="failed",
+            error=e,
+        )
         raise HTTPException(status_code=404, detail="Image not found") from e
 
-    return RedirectResponse(url=signed_url, status_code=302)
+

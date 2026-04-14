@@ -13,7 +13,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.config import PROJECT_ID, LOCATION, STORY_MODEL, PORT, FRONTEND_DIR, FIREBASE_ENABLED
+from app.config import (
+    FIREBASE_ENABLED,
+    FRONTEND_DIR,
+    LOCATION,
+    NARRATIVE_MODEL,
+    PORT,
+    PROJECT_ID,
+    VISUAL_MODEL,
+)
 from app.core.firebase import is_firebase_ready
 from app.server.errors import http_exception_handler, validation_exception_handler
 from app.server.middleware import setup_middleware
@@ -43,7 +51,8 @@ def create_app() -> FastAPI:
         logger.info("📖  The Emotional Chronicler — Creative Storyteller")
         logger.info("   Project:  %s", PROJECT_ID)
         logger.info("   Location: %s", LOCATION)
-        logger.info("   Agent:    %s  (ADK, native text+image)", STORY_MODEL)
+        logger.info("   Narrative model: %s", NARRATIVE_MODEL)
+        logger.info("   Visual model:    %s", VISUAL_MODEL)
         logger.info("   Firebase: %s", firebase_status)
         logger.info("   Port:     %s", PORT)
         logger.info("")

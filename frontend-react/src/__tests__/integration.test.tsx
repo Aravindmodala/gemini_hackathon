@@ -256,8 +256,36 @@ describe('App Integration', () => {
 
     expect(screen.getByText('Saved story intro')).toBeInTheDocument();
     expect(screen.getByText('Continues here.')).toBeInTheDocument();
+    const intro = screen.getByText('Saved story intro');
     const savedImg = screen.getByAltText('Home hero');
     expect(savedImg).toBeInTheDocument();
+    expect(intro.compareDocumentPosition(savedImg) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    window.history.replaceState({}, '', '/');
+  });
+
+  it('hydrates saved session image from generated_image tool interactions', async () => {
+    getSessionDetailMock.mockResolvedValueOnce({
+      title: 'Generated Session',
+      interactions: [
+        { text: 'Generated intro.' },
+        {
+          role: 'tool',
+          name: 'generated_image',
+          args: { image_url: '/api/images/generated.png', caption: 'Generated visual' },
+        },
+      ],
+    });
+    window.history.replaceState({}, '', '/story/generated');
+
+    render(<App />);
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 40));
+    });
+
+    const generatedImg = screen.getByAltText('Generated visual');
+    expect(generatedImg).toBeInTheDocument();
+    expect(generatedImg).toHaveAttribute('src', '/api/images/generated.png');
     window.history.replaceState({}, '', '/');
   });
 

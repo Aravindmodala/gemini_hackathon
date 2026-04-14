@@ -26,6 +26,7 @@ export function useStoryteller(options?: StorytellerOptions) {
 
   const abortRef = useRef<AbortController | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const startInFlightRef = useRef(false);
 
   // ── Music playback ──────────────────────────────────────────────────────────
 
@@ -57,6 +58,12 @@ export function useStoryteller(options?: StorytellerOptions) {
   // ── Start story ─────────────────────────────────────────────────────────────
 
   const startStory = useCallback(async (prompt: string, companionSessionId?: string) => {
+    // Prevent overlapping story starts (double-clicks / rapid re-entry).
+    if (startInFlightRef.current) {
+      return;
+    }
+    startInFlightRef.current = true;
+
     // Abort any in-flight request
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -180,6 +187,8 @@ export function useStoryteller(options?: StorytellerOptions) {
         console.error('[Story] Fetch error:', err);
         setStatus('error');
       }
+    } finally {
+      startInFlightRef.current = false;
     }
   }, [options?.getIdToken, appendText, playMusic]); // eslint-disable-line react-hooks/exhaustive-deps
 

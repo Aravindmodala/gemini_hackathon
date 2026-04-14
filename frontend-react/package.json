@@ -23,6 +23,7 @@
     "framer-motion": "^12.35.2",
     "framer-motion-3d": "^12.4.13",
     "lamina": "^1.2.2",
+    "lucide-react": "^1.7.0",
     "postprocessing": "^6.38.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

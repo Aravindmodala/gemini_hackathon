@@ -75,7 +75,9 @@ def verify_id_token(token: str) -> dict:
         raise ValueError("Firebase Admin SDK is not available")
 
     try:
-        decoded = firebase_auth.verify_id_token(token, app=app)
+        # Allow tiny clock skew between client and server to avoid
+        # transient "Token used too early" failures on otherwise valid tokens.
+        decoded = firebase_auth.verify_id_token(token, app=app, clock_skew_seconds=10)
         logger.debug("[Firebase] Token verified for uid=%s", decoded.get("uid"))
         return decoded
     except firebase_auth.InvalidIdTokenError as e:
