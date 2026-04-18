@@ -99,7 +99,6 @@ function App() {
 
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const location = useLocation();
-  const isStoryPage = location.pathname.startsWith('/story');
   const lastFetchedSessionIdRef = useRef<string | null>(null);
   const lastPatchedTitleKeyRef = useRef<string>('');
   const lastPatchedThumbnailRef = useRef<string>('');
@@ -220,19 +219,6 @@ function App() {
         className="app-root"
         style={{ flex: 1, marginLeft: isSidebarOpen ? SIDEBAR_WIDTH : 0, position: 'relative', minHeight: '100vh' }}
       >
-        {/* Top-left title badge — hidden on story pages */}
-        {!isStoryPage && (
-          <header className="app-header" style={{ left: isSidebarOpen ? 16 : 60 }}>
-            <div className="title-badge">
-              <span className="title-badge__gem">✦</span>
-              <div>
-                <h1 className="app-title">The Emotional Chronicler</h1>
-                <p className="app-subtitle">Illustrated AI Storytelling</p>
-              </div>
-            </div>
-          </header>
-        )}
-
         {/* Child page rendered here */}
         <Outlet context={outletContext} />
 
