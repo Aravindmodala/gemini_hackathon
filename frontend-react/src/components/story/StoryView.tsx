@@ -63,7 +63,7 @@ function StoryImage({ src, renderFallback, onError, ...imgProps }: StoryImagePro
   }, [src]);
 
   const handleError: ImgHTMLAttributes<HTMLImageElement>['onError'] = useCallback(
-    event => {
+    (event: React.SyntheticEvent<HTMLImageElement>) => {
       setHasError(true);
       onError?.(event);
     },

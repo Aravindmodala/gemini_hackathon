@@ -1,7 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import React from 'react';
 
 const mockGetIdToken = vi.fn().mockResolvedValue('mock-token');
-const authState = {
+const authState: { getIdToken: typeof mockGetIdToken; user: { uid: string } | null; loading: boolean } = {
   getIdToken: mockGetIdToken,
   user: { uid: 'user-1' },
   loading: false,
@@ -14,6 +16,18 @@ vi.mock('../../contexts/AuthContext', () => ({
 import { useSessions } from '../../hooks/useSessions';
 
 const mockFetch = vi.fn();
+
+function createWrapper() {
+  const testClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0, staleTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+  const Wrapper = ({ children }: { children: React.ReactNode }) =>
+    React.createElement(QueryClientProvider, { client: testClient }, children);
+  return { wrapper: Wrapper, queryClient: testClient };
+}
 
 describe('useSessions', () => {
   beforeEach(() => {
@@ -33,7 +47,8 @@ describe('useSessions', () => {
   });
 
   it('fetches sessions on mount when auth is ready', async () => {
-    const { result } = renderHook(() => useSessions());
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useSessions(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -66,7 +81,8 @@ describe('useSessions', () => {
       json: () => Promise.resolve({ data: fakeSessions }),
     });
 
-    const { result } = renderHook(() => useSessions());
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useSessions(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -78,7 +94,8 @@ describe('useSessions', () => {
   it('clears sessions when user is signed out', async () => {
     authState.user = null;
 
-    const { result } = renderHook(() => useSessions());
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useSessions(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -117,7 +134,8 @@ describe('useSessions', () => {
       })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
 
-    const { result } = renderHook(() => useSessions());
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useSessions(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.sessions).toHaveLength(2);
@@ -127,7 +145,9 @@ describe('useSessions', () => {
       await result.current.deleteSession('s1');
     });
 
-    expect(result.current.sessions.map(s => s.session_id)).toEqual(['s2']);
+    await waitFor(() => {
+      expect(result.current.sessions.map(s => s.session_id)).toEqual(['s2']);
+    });
   });
 
   it('renameSession updates local session title on success', async () => {
@@ -150,7 +170,8 @@ describe('useSessions', () => {
       })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
 
-    const { result } = renderHook(() => useSessions());
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useSessions(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.sessions).toHaveLength(1);
@@ -160,7 +181,9 @@ describe('useSessions', () => {
       await result.current.renameSession('s1', 'New Title');
     });
 
-    expect(result.current.sessions[0].title).toBe('New Title');
+    await waitFor(() => {
+      expect(result.current.sessions[0].title).toBe('New Title');
+    });
   });
 
   it('getSessionDetail returns data.data', async () => {
@@ -179,7 +202,8 @@ describe('useSessions', () => {
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: [] }) })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ data: detail }) });
 
-    const { result } = renderHook(() => useSessions());
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useSessions(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -224,7 +248,8 @@ describe('useSessions', () => {
       json: () => Promise.resolve({ data: fakeSessions }),
     });
 
-    const { result } = renderHook(() => useSessions());
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useSessions(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.sessions).toHaveLength(2);
@@ -234,12 +259,15 @@ describe('useSessions', () => {
       result.current.updateSessionInState('s1', { title: 'Mosquito Man Rising' });
     });
 
-    expect(result.current.sessions.find(s => s.session_id === 's1')?.title).toBe('Mosquito Man Rising');
+    await waitFor(() => {
+      expect(result.current.sessions.find(s => s.session_id === 's1')?.title).toBe('Mosquito Man Rising');
+    });
     expect(result.current.sessions.find(s => s.session_id === 's2')?.title).toBe('Already Titled');
   });
 
   it('updateSessionInState inserts a placeholder row when the session is missing', async () => {
-    const { result } = renderHook(() => useSessions());
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useSessions(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -249,12 +277,14 @@ describe('useSessions', () => {
       result.current.updateSessionInState('live-session-1', { title: 'Fresh Title' });
     });
 
-    expect(result.current.sessions[0]).toMatchObject({
-      session_id: 'live-session-1',
-      title: 'Fresh Title',
-      status: 'active',
-      interaction_count: 0,
-      preview: '',
+    await waitFor(() => {
+      expect(result.current.sessions[0]).toMatchObject({
+        session_id: 'live-session-1',
+        title: 'Fresh Title',
+        status: 'active',
+        interaction_count: 0,
+        preview: '',
+      });
     });
   });
 
@@ -264,7 +294,8 @@ describe('useSessions', () => {
       json: () => Promise.resolve({ data: [] }),
     });
 
-    const { result } = renderHook(() => useSessions());
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useSessions(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -272,6 +303,10 @@ describe('useSessions', () => {
 
     act(() => {
       result.current.updateSessionInState('live-session-2', { title: 'Mosquito Man Rising' });
+    });
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
     });
 
     mockFetch.mockResolvedValueOnce({
@@ -296,11 +331,13 @@ describe('useSessions', () => {
       await result.current.fetchSessions();
     });
 
-    expect(result.current.sessions[0]).toMatchObject({
-      session_id: 'live-session-2',
-      title: 'Mosquito Man Rising',
-      preview: 'Opening line',
-      interaction_count: 1,
+    await waitFor(() => {
+      expect(result.current.sessions[0]).toMatchObject({
+        session_id: 'live-session-2',
+        title: 'Mosquito Man Rising',
+        preview: 'Opening line',
+        interaction_count: 1,
+      });
     });
   });
 });

@@ -1,133 +1,159 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { API_BASE } from '../config/api';
 import type { Session, SessionDetail } from '../types/session';
 
-export function useSessions() {
-  const { getIdToken, user, loading: authLoading } = useAuth();
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const SESSIONS_KEY = ['sessions'] as const;
+const SESSION_DETAIL_KEY = (id: string) => ['sessions', id] as const;
 
-  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+function useAuthFetch() {
+  const { getIdToken } = useAuth();
 
-  const fetchWithAuthRetry = useCallback(
+  return useCallback(
     async (input: string, init?: RequestInit): Promise<Response> => {
       let token = await getIdToken();
       let res = await fetch(input, {
         ...init,
-        headers: {
-          ...(init?.headers || {}),
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { ...(init?.headers || {}), Authorization: `Bearer ${token}` },
       });
 
       if (res.status === 401) {
-        await wait(1200);
+        const TOKEN_REFRESH_DELAY_MS = 1200;
+        await new Promise(resolve => setTimeout(resolve, TOKEN_REFRESH_DELAY_MS));
         token = await getIdToken(true);
         res = await fetch(input, {
           ...init,
-          headers: {
-            ...(init?.headers || {}),
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { ...(init?.headers || {}), Authorization: `Bearer ${token}` },
         });
       }
 
       return res;
     },
-    [getIdToken]
+    [getIdToken],
   );
+}
 
-  const fetchSessions = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await fetchWithAuthRetry(`${API_BASE}/api/v1/sessions`);
+export function useSessions() {
+  const { user, loading: authLoading } = useAuth();
+  const queryClient = useQueryClient();
+  const authFetch = useAuthFetch();
+
+  const {
+    data: rawSessions,
+    isLoading,
+    error: queryError,
+  } = useQuery({
+    queryKey: [...SESSIONS_KEY],
+    queryFn: async () => {
+      const res = await authFetch(`${API_BASE}/api/v1/sessions`);
       if (!res.ok) throw new Error('Failed to fetch sessions');
-      const data = await res.json();
-      setSessions(prev => {
-        const incoming = Array.isArray(data.data) ? data.data : [];
-        const prevById = new Map(prev.map(session => [session.session_id, session]));
+      const json = await res.json();
+      const incoming: Session[] = Array.isArray(json.data) ? json.data : [];
 
-        const merged = incoming.map((session: Session) => {
-          const existing = prevById.get(session.session_id);
-          if (!existing) {
-            return session;
-          }
+      const currentSessions = queryClient.getQueryData<Session[]>([...SESSIONS_KEY]) ?? [];
+      const prevById = new Map(currentSessions.map(s => [s.session_id, s]));
 
-          const shouldPreserveLocalTitle =
-            (session.title === 'Untitled Story' || !session.title) &&
-            existing.title &&
-            existing.title !== 'Untitled Story';
+      const merged = incoming.map((session) => {
+        const existing = prevById.get(session.session_id);
+        if (!existing) return session;
 
-          return shouldPreserveLocalTitle
-            ? { ...session, title: existing.title, updated_at: existing.updated_at ?? session.updated_at }
-            : session;
-        });
+        const shouldPreserveLocalTitle =
+          (session.title === 'Untitled Story' || !session.title) &&
+          existing.title &&
+          existing.title !== 'Untitled Story';
 
-        const incomingIds = new Set(merged.map((session: Session) => session.session_id));
-        const localOnly = prev.filter(session => !incomingIds.has(session.session_id));
-        return [...localOnly, ...merged];
+        return shouldPreserveLocalTitle
+          ? { ...session, title: existing.title, updated_at: existing.updated_at ?? session.updated_at }
+          : session;
       });
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchWithAuthRetry]);
 
-  const deleteSession = useCallback(async (sessionId: string) => {
-    try {
-      const res = await fetchWithAuthRetry(`${API_BASE}/api/v1/sessions/${sessionId}`, {
+      const incomingIds = new Set(merged.map(s => s.session_id));
+      const localOnly = currentSessions.filter(s => !incomingIds.has(s.session_id));
+      return [...localOnly, ...merged];
+    },
+    enabled: !authLoading && !!user,
+  });
+
+  const sessions = rawSessions ?? [];
+  const loading = authLoading || isLoading;
+  const error = queryError ? (queryError as Error).message : null;
+
+  /* ── Delete mutation ─────────────────────────────────────── */
+
+  const deleteMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const res = await authFetch(`${API_BASE}/api/v1/sessions/${sessionId}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('Failed to delete session');
-      setSessions(prev => prev.filter(s => s.session_id !== sessionId));
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }, [fetchWithAuthRetry]);
+      return sessionId;
+    },
+    onSuccess: (sessionId) => {
+      queryClient.setQueryData<Session[]>([...SESSIONS_KEY], (old) =>
+        (old ?? []).filter(s => s.session_id !== sessionId),
+      );
+    },
+  });
 
-  const renameSession = useCallback(async (sessionId: string, title: string) => {
-    try {
-      const res = await fetchWithAuthRetry(`${API_BASE}/api/v1/sessions/${sessionId}`, {
+  const { mutateAsync: deleteMutateAsync } = deleteMutation;
+  const deleteSession = useCallback(
+    (sessionId: string) => deleteMutateAsync(sessionId),
+    [deleteMutateAsync],
+  );
+
+  /* ── Rename mutation (optimistic) ────────────────────────── */
+
+  const renameMutation = useMutation({
+    mutationFn: async ({ sessionId, title }: { sessionId: string; title: string }) => {
+      const res = await authFetch(`${API_BASE}/api/v1/sessions/${sessionId}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
       });
       if (!res.ok) throw new Error('Failed to rename session');
-      setSessions(prev =>
-        prev.map(s => s.session_id === sessionId ? { ...s, title } : s)
+    },
+    onMutate: async ({ sessionId, title }) => {
+      await queryClient.cancelQueries({ queryKey: [...SESSIONS_KEY] });
+      const previous = queryClient.getQueryData<Session[]>([...SESSIONS_KEY]);
+      queryClient.setQueryData<Session[]>([...SESSIONS_KEY], (old) =>
+        (old ?? []).map(s => (s.session_id === sessionId ? { ...s, title } : s)),
       );
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }, [fetchWithAuthRetry]);
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      queryClient.setQueryData([...SESSIONS_KEY], ctx?.previous);
+    },
+  });
 
-  const getSessionDetail = useCallback(async (sessionId: string): Promise<SessionDetail> => {
-    try {
-      setError(null);
-      const res = await fetchWithAuthRetry(`${API_BASE}/api/v1/sessions/${sessionId}`);
+  const { mutateAsync: renameMutateAsync } = renameMutation;
+  const renameSession = useCallback(
+    (sessionId: string, title: string) => renameMutateAsync({ sessionId, title }),
+    [renameMutateAsync],
+  );
+
+  /* ── Imperative session detail fetch ─────────────────────── */
+
+  const getSessionDetail = useCallback(
+    async (sessionId: string): Promise<SessionDetail> => {
+      const res = await authFetch(`${API_BASE}/api/v1/sessions/${sessionId}`);
       if (!res.ok) throw new Error('Failed to fetch session detail');
-      const data = await res.json();
-      return data.data as SessionDetail;
-    } catch (err: any) {
-      setError(err.message);
-      throw err;
-    }
-  }, [fetchWithAuthRetry]);
+      const json = await res.json();
+      return json.data as SessionDetail;
+    },
+    [authFetch],
+  );
+
+  /* ── Direct cache update (used by SSE title / thumbnail) ── */
 
   const updateSessionInState = useCallback(
     (sessionId: string, patch: Partial<Session>) => {
-      setSessions(prev => {
-        const existing = prev.find(s => s.session_id === sessionId);
+      queryClient.setQueryData<Session[]>([...SESSIONS_KEY], (old) => {
+        const list = old ?? [];
+        const existing = list.find(s => s.session_id === sessionId);
         if (existing) {
-          return prev.map(s => (s.session_id === sessionId ? { ...s, ...patch } : s));
+          return list.map(s => (s.session_id === sessionId ? { ...s, ...patch } : s));
         }
-
         const now = new Date().toISOString();
         const placeholder: Session = {
           session_id: sessionId,
@@ -138,22 +164,17 @@ export function useSessions() {
           interaction_count: patch.interaction_count ?? 0,
           preview: patch.preview ?? '',
         };
-        return [placeholder, ...prev];
+        return [placeholder, ...list];
       });
     },
-    []
+    [queryClient],
   );
 
-  // Fetch once auth is ready and user is logged in
-  useEffect(() => {
-    if (!authLoading && user) {
-      fetchSessions();
-    }
-    if (!authLoading && !user) {
-      setSessions([]);
-      setLoading(false);
-    }
-  }, [authLoading, user, fetchSessions]);
+  /* ── Compatibility shim for imperative refresh ───────────── */
+
+  const fetchSessions = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: [...SESSIONS_KEY] });
+  }, [queryClient]);
 
   return {
     sessions,
@@ -165,4 +186,23 @@ export function useSessions() {
     renameSession,
     updateSessionInState,
   };
+}
+
+/* ── Standalone hook for session detail queries ────────────── */
+
+export function useSessionDetail(sessionId: string | null) {
+  const { user } = useAuth();
+  const authFetch = useAuthFetch();
+
+  return useQuery({
+    queryKey: SESSION_DETAIL_KEY(sessionId ?? ''),
+    queryFn: async () => {
+      const res = await authFetch(`${API_BASE}/api/v1/sessions/${sessionId}`);
+      if (!res.ok) throw new Error('Failed to fetch session detail');
+      const json = await res.json();
+      return json.data as SessionDetail;
+    },
+    enabled: !!sessionId && !!user,
+    staleTime: 5 * 60 * 1000,
+  });
 }
