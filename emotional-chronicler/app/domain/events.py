@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 
 SCHEMA_VERSION = 2
 
@@ -66,13 +66,14 @@ StoryEvent = Annotated[
     Field(discriminator="kind"),
 ]
 
+# Built once at import time — Pydantic v2 constructs the full validator chain
+# for the discriminated union, which is expensive to repeat per-call.
+_event_adapter: TypeAdapter = TypeAdapter(StoryEvent)
+
 
 def parse_event(raw: dict) -> StoryEvent:
     """Deserialize a raw Firestore dict into the correct StoryEvent subtype.
 
     Raises ValidationError if the dict does not match any known event kind.
     """
-    # Pydantic's discriminated union resolution
-    from pydantic import TypeAdapter
-    _adapter = TypeAdapter(StoryEvent)
-    return _adapter.validate_python(raw)
+    return _event_adapter.validate_python(raw)
