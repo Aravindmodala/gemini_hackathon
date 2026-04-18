@@ -25,7 +25,8 @@ from app.config import (
 from app.core.firebase import is_firebase_ready
 from app.server.errors import http_exception_handler, validation_exception_handler
 from app.server.middleware import setup_middleware
-from app.server.routes import router, api_router
+from app.server.asset_routes import legacy_asset_router, asset_router
+from app.server.routes import api_router, router
 from app.server.session_routes import router as session_router
 from app.server.chat_routes import chat_router
 
@@ -74,9 +75,11 @@ def create_app() -> FastAPI:
 
     # Routes — static assets and SPA catch-all (no version prefix)
     app.include_router(router)
+    app.include_router(legacy_asset_router)
 
     # Versioned API routes
     app.include_router(api_router, prefix="/api/v1")
+    app.include_router(asset_router, prefix="/api/v1")
     app.include_router(session_router, prefix="/api/v1")
     app.include_router(chat_router, prefix="/api/v1")
 
