@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from google.cloud import firestore
 
 from app.config import PROJECT_ID
+from app.domain.events import SCHEMA_VERSION, StoryEvent
+from app.domain.events import SCHEMA_VERSION, StoryEvent
 
 logger = logging.getLogger("chronicler")
 
@@ -141,6 +143,77 @@ class SessionStore:
             "[Store] Session created: %s/%s", self.user_id, self.session_id
         )
         return self.session_id
+
+    def create_session_v2(self, title: str = "Untitled Story") -> str:
+        """Create a new v2 session document with events[] array. Returns session_id.
+
+        Unlike create_session() which uses interactions[], this creates a session
+        with schema_version=2 and an empty events[] array for seq-ordered event storage.
+        """
+        self.session_id = uuid.uuid4().hex
+
+        if not self._db:
+            logger.warning("[Store] Firestore unavailable — session not persisted")
+            return self.session_id
+
+        now = datetime.now(timezone.utc)
+
+        try:
+            self._doc_ref = _session_doc_ref(self._db, self.user_id, self.session_id)
+
+            self._doc_ref.set({
+                "schema_version": SCHEMA_VERSION,
+                "created_at": now,
+                "updated_at": now,
+                "status": "active",
+                "title": title,
+                "events": [],
+            })
+            logger.info(
+                "[Store] Session v2 created: %s/%s", self.user_id, self.session_id
+            )
+        except Exception as e:
+            logger.warning("[Store] Failed to create session v2: %s", e)
+            self._doc_ref = None
+
+        return self.session_id
+
+    def append_event(self, event: StoryEvent) -> None:
+        """Append a single typed event to the session's events[] array.
+
+        Uses Firestore ArrayUnion for atomic append. Also bumps updated_at.
+        """
+        if not self._doc_ref:
+            return
+
+        event_dict = event.model_dump()
+
+        try:
+            self._doc_ref.update({
+                "events": firestore.ArrayUnion([event_dict]),
+                "updated_at": datetime.now(timezone.utc),
+            })
+        except Exception as e:
+            logger.warning("[Store] Failed to append event: %s", e)
+
+    def append_events_batch(self, events: list[StoryEvent]) -> None:
+        """Append multiple events in a single Firestore write.
+
+        More efficient than calling append_event() in a loop when multiple
+        events are ready at once (e.g., at stream end).
+        """
+        if not self._doc_ref or not events:
+            return
+
+        event_dicts = [e.model_dump() for e in events]
+
+        try:
+            self._doc_ref.update({
+                "events": firestore.ArrayUnion(event_dicts),
+                "updated_at": datetime.now(timezone.utc),
+            })
+        except Exception as e:
+            logger.warning("[Store] Failed to append events batch: %s", e)
 
     def log_interaction(self, role: str, text: str) -> None:
         """

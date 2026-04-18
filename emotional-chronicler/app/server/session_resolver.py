@@ -49,7 +49,7 @@ class SessionResolver:
                     logger.info("[Session] resumed session_id=%s", session_id)
                 else:
                     session_id = await asyncio.to_thread(
-                        store.create_session, session_title
+                        store.create_session_v2, session_title
                     )
                     logger.info(
                         "[Session] created new session_id=%s (resume failed)",
@@ -57,7 +57,7 @@ class SessionResolver:
                     )
             else:
                 session_id = await asyncio.to_thread(
-                    store.create_session, session_title
+                    store.create_session_v2, session_title
                 )
                 logger.info("[Session] created new session_id=%s", session_id)
         else:
