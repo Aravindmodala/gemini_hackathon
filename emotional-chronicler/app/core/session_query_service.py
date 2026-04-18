@@ -11,6 +11,8 @@ from google.cloud import firestore
 
 from app.config import GCS_BUCKET
 from app.core.store import _get_db, _safe_iso, _session_doc_ref, _get_preview
+from app.domain.events import parse_event
+from app.domain.sections import events_to_sections, legacy_interactions_to_sections
 
 logger = logging.getLogger("chronicler")
 
@@ -31,6 +33,26 @@ def _get_thumbnail(interactions: list[dict]) -> str | None:
         if url:
             return url
     return None
+
+
+def _get_thumbnail_from_events(raw_events: list[dict]) -> str | None:
+    """Return the image_url of the first image event."""
+    for event in raw_events:
+        if isinstance(event, dict) and event.get("kind") == "image":
+            url = event.get("image_url", "")
+            if url:
+                return url
+    return None
+
+
+def _get_preview_from_events(raw_events: list[dict]) -> str:
+    """Return a short preview from the first text_segment event."""
+    for event in raw_events:
+        if isinstance(event, dict) and event.get("kind") == "text_segment":
+            text = event.get("text", "")
+            if text:
+                return text[:100] + ("..." if len(text) > 100 else "")
+    return "New story"
 
 
 def _extract_user_id_from_doc_ref(doc_ref) -> str | None:
@@ -188,19 +210,31 @@ class SessionQueryService:
             sessions = []
             for doc in page_docs:
                 data = doc.to_dict()
-                interactions = _rewrite_legacy_image_urls(
-                    data.get("interactions", []),
-                    session_id=doc.id,
-                )
+                schema_version = data.get("schema_version", 1)
+
+                if schema_version >= 2:
+                    raw_events = data.get("events", [])
+                    thumbnail_url = _get_thumbnail_from_events(raw_events)
+                    preview = _get_preview_from_events(raw_events)
+                    interaction_count = len(raw_events)
+                else:
+                    interactions = _rewrite_legacy_image_urls(
+                        data.get("interactions", []),
+                        session_id=doc.id,
+                    )
+                    thumbnail_url = _get_thumbnail(interactions)
+                    preview = _get_preview(interactions)
+                    interaction_count = len(interactions)
+
                 sessions.append({
                     "session_id": doc.id,
                     "title": data.get("title", "Untitled Story"),
                     "status": data.get("status", "unknown"),
                     "created_at": _safe_iso(data.get("created_at")),
                     "updated_at": _safe_iso(data.get("updated_at")),
-                    "interaction_count": len(interactions),
-                    "preview": _get_preview(interactions),
-                    "thumbnail_url": _get_thumbnail(interactions),
+                    "interaction_count": interaction_count,
+                    "preview": preview,
+                    "thumbnail_url": thumbnail_url,
                 })
 
             next_cursor = page_docs[-1].id if has_next and page_docs else None
@@ -222,21 +256,78 @@ class SessionQueryService:
             if not doc.exists:
                 return None
             data = doc.to_dict()
-            interactions = _rewrite_legacy_image_urls(
-                data.get("interactions", []),
-                session_id=doc.id,
-            )
-            return {
-                "session_id": doc.id,
-                "title": data.get("title", "Untitled Story"),
-                "status": data.get("status", "unknown"),
-                "created_at": _safe_iso(data.get("created_at")),
-                "updated_at": _safe_iso(data.get("updated_at")),
-                "interactions": interactions,
-            }
+            schema_version = data.get("schema_version", 1)
+            if schema_version >= 2:
+                return SessionQueryService._read_v2(data, doc.id)
+            return SessionQueryService._read_v1_legacy(data, doc.id)
         except Exception as e:
-            logger.warning("[SessionQuery] Failed to get session: %s", e)
+            logger.warning("[SessionQuery] Failed to get session %s: %s", session_id, e)
             return None
+
+    @staticmethod
+    def _read_v1_legacy(data: dict, session_id: str) -> dict:
+        """Read a v1 session (interactions[] schema). Reconstructs sections server-side."""
+        interactions = _rewrite_legacy_image_urls(
+            data.get("interactions", []),
+            session_id=session_id,
+        )
+        sections = legacy_interactions_to_sections(interactions)
+        return {
+            "session_id": session_id,
+            "title": data.get("title", "Untitled Story"),
+            "status": data.get("status", "unknown"),
+            "created_at": _safe_iso(data.get("created_at")),
+            "updated_at": _safe_iso(data.get("updated_at")),
+            "schema_version": 1,
+            "interactions": interactions,
+            "sections": sections,
+        }
+
+    @staticmethod
+    def _read_v2(data: dict, session_id: str) -> dict:
+        """Read a v2 session (events[] schema). Returns sections[] pre-computed."""
+        raw_events = data.get("events", [])
+        parsed_events = []
+        skipped = 0
+        for raw in raw_events:
+            try:
+                parsed_events.append(parse_event(raw))
+            except Exception as e:
+                skipped += 1
+                logger.warning(
+                    "[SessionQuery] Skipped malformed event in session %s kind=%s error=%s",
+                    session_id,
+                    raw.get("kind", "unknown") if isinstance(raw, dict) else "?",
+                    e,
+                )
+        if skipped:
+            logger.warning(
+                "[SessionQuery] session=%s skipped %d malformed event(s) out of %d total",
+                session_id,
+                skipped,
+                len(raw_events),
+            )
+
+        sections = events_to_sections(parsed_events)
+
+        logger.debug(
+            "[SessionQuery] v2 session=%s events=%d sections=%d",
+            session_id,
+            len(parsed_events),
+            len(sections),
+        )
+
+        return {
+            "session_id": session_id,
+            "title": data.get("title", "Untitled Story"),
+            "status": data.get("status", "unknown"),
+            "created_at": _safe_iso(data.get("created_at")),
+            "updated_at": _safe_iso(data.get("updated_at")),
+            "schema_version": 2,
+            "events": [e.model_dump() for e in parsed_events],
+            "sections": sections,
+            "interactions": [],
+        }
 
     @staticmethod
     def delete_session(user_id: str, session_id: str) -> bool:
