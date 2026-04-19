@@ -21,6 +21,7 @@ from app.server.auth_middleware import get_optional_user
 from app.server.session_resolver import SessionResolver
 from app.services.companion_context_loader import CompanionContextLoader
 from app.services.image_pipeline import ImagePipeline
+from app.services.user_preferences_loader import UserPreferencesLoader
 from app.services.stream_orchestrator import StoryStreamOrchestrator
 from app.services.title_extractor import TitleExtractor
 
@@ -93,6 +94,15 @@ async def generate_story(request: StoryRequest, http_request: Request):
         is_authenticated=is_authenticated,
     )
 
+    user_prefs_ctx = await UserPreferencesLoader().load(
+        user_id=user_id,
+        is_authenticated=is_authenticated,
+    )
+
+    prompt_text = companion_ctx.prompt_text
+    if user_prefs_ctx.applied:
+        prompt_text = f"{user_prefs_ctx.preamble}\n\n{prompt_text}"
+
     pipeline = ImagePipeline(session_id)
     title_extractor = TitleExtractor(request.prompt)
 
@@ -106,7 +116,7 @@ async def generate_story(request: StoryRequest, http_request: Request):
 
     return StreamingResponse(
         orchestrator.run(
-            prompt_text=companion_ctx.prompt_text,
+            prompt_text=prompt_text,
             original_prompt=request.prompt,
             companion_context=companion_ctx,
         ),

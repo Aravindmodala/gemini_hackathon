@@ -47,11 +47,6 @@ export function EmptyState() {
           <span className={styles.dividerLine} />
         </div>
 
-        <p className={styles.subtitle}>
-          Craft magical stories through your emotions.
-          <br />
-          Where imagination meets enchanting worlds.
-        </p>
       </div>
     </div>
   );

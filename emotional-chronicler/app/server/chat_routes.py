@@ -30,6 +30,7 @@ from app.core.agent import companion_runner, APP_NAME
 from app.server.auth_middleware import get_optional_user
 from app.server.session_resolver import SessionResolver
 from app.server.sse import format_sse_event
+from app.services.user_preferences_loader import UserPreferencesLoader
 
 logger = logging.getLogger("chronicler")
 
@@ -74,6 +75,8 @@ async def companion_chat(request: CompanionRequest, http_request: Request):
     Firestore so the story agent can load them later.
     """
     auth_user = await get_optional_user(http_request)
+    is_first_turn = request.session_id is None
+    is_authenticated = bool(auth_user)
 
     resolver = SessionResolver()
     user_id, session_id, store = await resolver.resolve(
@@ -93,6 +96,13 @@ async def companion_chat(request: CompanionRequest, http_request: Request):
     if store:
         await asyncio.to_thread(store.log_interaction, "user", request.message)
 
+    user_prefs_ctx = None
+    if is_first_turn and is_authenticated:
+        user_prefs_ctx = await UserPreferencesLoader().load(
+            user_id=user_id,
+            is_authenticated=is_authenticated,
+        )
+
     async def event_stream():
         try:
             # Emit session id so the frontend can track it
@@ -102,9 +112,16 @@ async def companion_chat(request: CompanionRequest, http_request: Request):
             adk_manager = ADKSessionManager(companion_runner, APP_NAME)
             await adk_manager.ensure_session_exists(user_id, session_id)
 
+            message_text = request.message
+            if user_prefs_ctx and user_prefs_ctx.applied:
+                message_text = (
+                    f"{user_prefs_ctx.preamble}\n\n"
+                    f"The traveler's message: {request.message}"
+                )
+
             new_message = genai_types.Content(
                 role="user",
-                parts=[genai_types.Part(text=request.message)],
+                parts=[genai_types.Part(text=message_text)],
             )
 
             full_response = ""

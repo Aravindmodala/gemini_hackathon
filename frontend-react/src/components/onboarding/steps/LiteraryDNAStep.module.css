@@ -1,0 +1,33 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.title {
+  font-family: 'Cinzel', 'Georgia', serif;
+  font-size: 28px;
+  font-weight: 600;
+  color: #e2e8f0;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+
+.subtitle {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}

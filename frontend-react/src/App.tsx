@@ -7,6 +7,7 @@ import { useAuth } from './contexts/AuthContext';
 import { useStoryteller } from './hooks/useStoryteller';
 import { useSessions } from './hooks/useSessions';
 import { useCompanionChat } from './hooks/useCompanionChat';
+import { useUserProfile } from './hooks/useUserProfile';
 import { SIDEBAR_WIDTH } from './config/layout';
 import type { StoryProposal, ChatMessage } from './hooks/useCompanionChat';
 import type { StoryStatus, StorySection } from './hooks/useStoryteller';
@@ -74,6 +75,7 @@ const loadingStyles: Record<string, CSSProperties> = {
 function App() {
   const { user, loading, signOut, getIdToken } = useAuth();
   const navigate = useNavigate();
+  const { profile, isLoading: profileLoading } = useUserProfile();
 
   const {
     sessions,
@@ -99,7 +101,6 @@ function App() {
 
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const location = useLocation();
-  const isStoryPage = location.pathname.startsWith('/story');
   const lastFetchedSessionIdRef = useRef<string | null>(null);
   const lastPatchedTitleKeyRef = useRef<string>('');
   const lastPatchedThumbnailRef = useRef<string>('');
@@ -150,6 +151,15 @@ function App() {
     updateSessionInState(sessionId, { thumbnail_url: firstImage.url });
   }, [sessionId, sections, updateSessionInState]);
 
+  useEffect(() => {
+    if (!user) return;
+    if (profileLoading) return;
+    if (!profile) return;
+    if (profile.onboarded_at != null) return;
+    if (location.pathname === '/onboarding') return;
+    navigate('/onboarding', { replace: true });
+  }, [user, profile, profileLoading, location.pathname, navigate]);
+
   // ── New story (reset everything) ──────────────────────────────────────────
   const handleNewStory = useCallback(() => {
     stopStory();
@@ -171,6 +181,8 @@ function App() {
   /* ── Auth gates ─────────────────────────────────────────── */
   if (loading) return <LoadingScreen />;
   if (!user)   return <AuthScreen />;
+  // Avoid flashing the app shell before the onboarding redirect decision is made.
+  if (profileLoading && !profile) return <LoadingScreen />;
 
   /* ── Outlet context — available to all child pages ──────── */
   const outletContext: AppOutletContext = {
@@ -220,19 +232,6 @@ function App() {
         className="app-root"
         style={{ flex: 1, marginLeft: isSidebarOpen ? SIDEBAR_WIDTH : 0, position: 'relative', minHeight: '100vh' }}
       >
-        {/* Top-left title badge — hidden on story pages */}
-        {!isStoryPage && (
-          <header className="app-header" style={{ left: isSidebarOpen ? 16 : 60 }}>
-            <div className="title-badge">
-              <span className="title-badge__gem">✦</span>
-              <div>
-                <h1 className="app-title">The Emotional Chronicler</h1>
-                <p className="app-subtitle">Illustrated AI Storytelling</p>
-              </div>
-            </div>
-          </header>
-        )}
-
         {/* Child page rendered here */}
         <Outlet context={outletContext} />
 
