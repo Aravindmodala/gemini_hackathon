@@ -1,17 +1,9 @@
-/**
- * HomePage — The landing page shown at `/`.
- *
- * Redesigned as a proper two-zone full-screen layout:
- *   - Hero zone (flex:1): animated title + subtitle (EmptyState)
- *   - Prompt zone (flex-shrink:0): story input box (StoryPrompt)
- *
- * No overlap, no fixed-bottom collision.
- */
-
 import { useCallback } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { EmptyState } from '../components/layout/EmptyState';
+import { ProfileButton } from '../components/layout/ProfileButton';
 import { StoryPrompt } from '../components/story/StoryPrompt';
+import { useUserProfile } from '../hooks/useUserProfile';
 import type { AppOutletContext } from '../App';
 import styles from './HomePage.module.css';
 
@@ -21,6 +13,8 @@ export function HomePage() {
     status,
     startStory,
   } = useOutletContext<AppOutletContext>();
+
+  const { profile } = useUserProfile();
 
   const handleBeginStory = useCallback((prompt: string) => {
     void startStory(prompt);
@@ -35,6 +29,8 @@ export function HomePage() {
 
   return (
     <div className={styles.layout}>
+      <ProfileButton profile={profile} />
+
       {/* ── Hero zone: cinematic title ──────────────────── */}
       {status === 'idle' && <EmptyState />}
 

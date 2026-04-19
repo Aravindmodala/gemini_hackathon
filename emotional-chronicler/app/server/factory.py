@@ -29,6 +29,7 @@ from app.server.asset_routes import legacy_asset_router, asset_router
 from app.server.routes import api_router, router
 from app.server.session_routes import router as session_router
 from app.server.chat_routes import chat_router
+from app.server.user_routes import user_router
 
 logger = logging.getLogger("chronicler")
 
@@ -82,5 +83,6 @@ def create_app() -> FastAPI:
     app.include_router(asset_router, prefix="/api/v1")
     app.include_router(session_router, prefix="/api/v1")
     app.include_router(chat_router, prefix="/api/v1")
+    app.include_router(user_router, prefix="/api/v1/users")
 
     return app
