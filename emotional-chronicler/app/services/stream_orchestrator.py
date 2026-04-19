@@ -16,6 +16,7 @@ from google.genai import types as genai_types
 from app.core.adk_session_manager import ADKSessionManager
 from app.core.agent import runner, APP_NAME
 from app.core.store import SessionStore
+from app.prompts import ELORA_SYSTEM_PROMPT
 from app.domain.events import ImageEvent, TextSegmentEvent, UserPromptEvent
 from app.server.prompt_parser import (
     extract_image_prompts, has_partial_marker, split_text_at_markers,
@@ -127,6 +128,22 @@ class StoryStreamOrchestrator:
             await self._store_event(UserPromptEvent(
                 seq=self._next_seq(), kind="user_prompt", text=original_prompt, ts=_now_iso(),
             ))
+
+            # --- LLM payload (Elora): system instruction lives on the agent; user turn is below. ---
+            _reader_profile = prompt_text.lstrip().startswith("READER PROFILE")
+            logger.info(
+                "[Story][LLM] session_id=%s user_message_chars=%d elora_system_chars=%d "
+                "reader_profile_prepended=%s",
+                self._session_id,
+                len(prompt_text),
+                len(ELORA_SYSTEM_PROMPT),
+                _reader_profile,
+            )
+            logger.info("[Story][LLM] user_message (full text sent as user role):\n%s", prompt_text)
+            logger.debug(
+                "[Story][LLM] elora_system_instruction (full text from elora.py):\n%s",
+                ELORA_SYSTEM_PROMPT,
+            )
 
             new_message = genai_types.Content(
                 role="user", parts=[genai_types.Part(text=prompt_text)],

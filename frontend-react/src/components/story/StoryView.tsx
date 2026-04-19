@@ -109,6 +109,7 @@ export function StoryView({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [sections.length, status]);
 
+
   // ── Scroll: parallax + reading progress ──────────────────────────────────
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -276,25 +277,6 @@ export function StoryView({
                       style={{ transitionDelay: `${delay}s` }}
                     >
                       {block.label || '...'}
-                    </div>
-                  );
-                }
-
-                if (block.type === 'dialogue') {
-                  return (
-                    <div
-                      key={key}
-                      data-testid={`story-block-dialogue-${i}-${blockIndex}`}
-                      className={`${styles.animSection} ${styles.dialogueBlock}`}
-                      style={{ transitionDelay: `${delay}s` }}
-                    >
-                      {block.speaker && (
-                        <p className={styles.dialogueSpeaker}>{block.speaker}</p>
-                      )}
-                      <p className={styles.dialogueText}>
-                        {renderSegments(block.chunks)}
-                        {isLastTextBlock && <span className={styles.cursor} aria-hidden />}
-                      </p>
                     </div>
                   );
                 }

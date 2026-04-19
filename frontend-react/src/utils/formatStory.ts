@@ -15,12 +15,6 @@ export interface HeadingBlock {
   chunks: InlineChunk[];
 }
 
-export interface DialogueBlock {
-  type: 'dialogue';
-  speaker?: string;
-  chunks: InlineChunk[];
-}
-
 export interface SceneDividerBlock {
   type: 'sceneDivider';
   label?: string;
@@ -29,7 +23,6 @@ export interface SceneDividerBlock {
 export type StoryTextBlock =
   | ParagraphBlock
   | HeadingBlock
-  | DialogueBlock
   | SceneDividerBlock;
 
 const SCENE_DIVIDER_REGEX = /^\s*((\*{3,})|(-{3,})|(_{3,})|(scene break)|(act )|(chapter ))\s*$/i;
@@ -67,28 +60,6 @@ function isHeading(lines: string[]): boolean {
   }
   const uppercase = letters.replace(/[^A-Z]/g, '').length;
   return letters.length > 3 && uppercase / letters.length > 0.75 && joined.split(' ').length <= 8;
-}
-
-function parseDialogue(lines: string[]): { speaker?: string; text: string } | null {
-  if (!lines.length) {
-    return null;
-  }
-  const dialogueLinePattern = /^[A-Z][A-Za-z0-9'’\s-]*:/;
-  const isDialogue = lines.every(line => {
-    const trimmed = line.trim();
-    if (!trimmed) return false;
-    return dialogueLinePattern.test(trimmed) || trimmed.startsWith('—') || trimmed.startsWith('-');
-  });
-  if (!isDialogue) {
-    return null;
-  }
-
-  const firstLine = lines[0].trim();
-  const nameMatch = firstLine.match(/^([A-Za-z'’\s-]+):\s*(.*)$/);
-  const speaker = nameMatch?.[1].trim();
-  const bodyLines = nameMatch ? [nameMatch[2], ...lines.slice(1)] : lines;
-  const text = bodyLines.filter(Boolean).join(' ');
-  return { speaker, text };
 }
 
 function findClosing(text: string, start: number, delimiter: string): number {
@@ -169,12 +140,6 @@ export function formatStoryText(raw: string): StoryTextBlock[] {
 
     if (isHeading(lines)) {
       blocks.push({ type: 'heading', chunks: parseInline(combined) });
-      continue;
-    }
-
-    const dialogue = parseDialogue(lines);
-    if (dialogue) {
-      blocks.push({ type: 'dialogue', speaker: dialogue.speaker, chunks: parseInline(dialogue.text) });
       continue;
     }
 
